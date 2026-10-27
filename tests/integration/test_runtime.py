@@ -319,6 +319,28 @@ async def test_preheat_now_latch_holds_and_releases(
     assert hass.states.get(NOW_SENSOR).state == "off"
 
 
+async def test_status_unreliable(hass: HomeAssistant, fake_model: None) -> None:
+    """Implausible parameters give no preheat value and no preheat start."""
+    set_inputs(hass)
+    entry = await setup_entry(hass, make_entry(hass))
+    coordinator = await _fitted(hass, entry)
+    estimate = PreheatEstimate(
+        minutes=None,
+        reachable=False,
+        target_c=20.5,
+        start_c=19.0,
+        outdoor_used_c=None,
+        max_reachable_c=None,
+        reason={"status": "unreliable", "unreliable_reason": "max_reachable_implausible"},
+    )
+    with patch.object(coordinator.model, "preheat", return_value=estimate):
+        await coordinator.async_refresh()
+    state = hass.states.get(PREHEAT)
+    assert state.state == STATE_UNKNOWN
+    assert state.attributes["reason"] == "unreliable"
+    assert coordinator.data.preheat_start is None
+
+
 async def test_status_no_outdoor(hass: HomeAssistant, fake_model: None) -> None:
     """A model without an outdoor temperature reports its own status, not unreachable."""
     set_inputs(hass)

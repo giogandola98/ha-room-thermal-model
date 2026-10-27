@@ -7,6 +7,11 @@ exactly minute by minute::
 
 - on/off thermostat (hysteresis around a comfort/eco schedule) → effort 1/0 like
   ``hvac_action`` heating/idle;
+- optional thermostatic valve (``trv_band_k > 0``): the reported effort stays 1 while the
+  room is below the setpoint, but the valve throttles proportionally inside the band, so
+  near the setpoint the real heating is a fraction of the full power;
+- optional heat source off (``heat_source_off_days``): the thermostat keeps reporting
+  "heating" but no heat arrives (boiler idle, heating season not started);
 - sensor readings with Gaussian noise (σ≈0.05 K) and 0.1 K quantisation;
 - outdoor temperature: daily sinusoid + weather fronts (smooth level changes);
 - disturbances: unflagged window openings (1–3 K drop in 10–20 min), missing data
@@ -50,6 +55,8 @@ class RoomSpec:
     front_amp: float = 5.0
     weekday_comfort: tuple[tuple[float, float], ...] = ((6.5, 8.5), (17.0, 22.5))
     weekend_comfort: tuple[tuple[float, float], ...] = ((8.0, 23.0),)
+    trv_band_k: float = 0.0
+    heat_source_off_days: tuple[tuple[float, float], ...] = ()
     seed: int = 1
 
     @property
@@ -155,7 +162,7 @@ class SyntheticRun:
     samples: list[Sample]
     true_temp: list[float]  # per minute (state at the start of the minute)
     outdoor: list[float]  # per minute (true)
-    effort: list[float]  # per minute
+    effort: list[float]  # per minute (real heating; samples carry the reported effort)
     outdoor_profile: OutdoorProfile
     windows: list[tuple[datetime, float]] = field(default_factory=list)  # (start, drop K)
 
@@ -245,7 +252,15 @@ def generate(
             heating = True
         elif temp > sp + spec.hysteresis_k:
             heating = False
-        u = 1.0 if heating else 0.0
+        if spec.trv_band_k > 0:
+            # the thermostat reports heating below the setpoint, the valve throttles
+            reported = 1.0 if temp < sp else 0.0
+            u = min(1.0, max(0.0, (sp - temp) / spec.trv_band_k)) if reported else 0.0
+        else:
+            reported = u = 1.0 if heating else 0.0
+        day = m / 1440.0
+        if any(lo <= day < hi for lo, hi in spec.heat_source_off_days):
+            u = 0.0
         u_hist.append(u)
         true_temp.append(temp)
         out_list.append(tout)
@@ -259,7 +274,7 @@ def generate(
                     ts,
                     round(meas, 2),
                     o,
-                    None if excluded[m] else u,
+                    None if excluded[m] else reported,
                     excluded[m],
                 )
             )
@@ -321,9 +336,27 @@ def true_coast(
     return temp
 
 
+def trv_room(**kw: object) -> RoomSpec:
+    """Radiator behind a thermostatic valve, with two days of boiler off."""
+    base: dict[str, object] = {
+        "name": "trv",
+        "a": 3.0,
+        "b": 0.08,
+        "c": 0.2,
+        "dead_time_minutes": 25.0,
+        "trv_band_k": 0.6,
+        "hysteresis_k": 0.1,
+        "heat_source_off_days": ((3.0, 5.0),),
+        "seed": 17,
+    }
+    base.update(kw)
+    return RoomSpec(**base)  # type: ignore[arg-type]
+
+
 ROOMS: dict[str, Callable[..., RoomSpec]] = {
     "radiator": radiator_room,
     "fast_radiator": fast_radiator_room,
     "underfloor": underfloor_room,
     "no_outdoor": no_outdoor_room,
+    "trv": trv_room,
 }

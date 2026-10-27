@@ -14,7 +14,9 @@ data ``Tout ≡ 0`` and ``c`` absorbs ``b·mean(Tout)`` (the equilibrium is lear
 - Huber IRLS (3 passes, fixed robust scale) down-weights outliers such as open windows;
 - dead time grid search ``d ∈ {0, step, …, max_dead_time}`` choosing the lowest
   weighted Huber loss;
-- projection ``a ≥ 0.05``, ``0.01 ≤ b ≤ 2`` (the remaining parameters are re-solved).
+- projection ``a ≥ 0.05``, ``0.01 ≤ b ≤ 2`` (the remaining parameters are re-solved);
+  a projected ``b`` means the data could not identify the loss rate (the model then
+  falls back to the free-cooling estimate, see ``model.py``).
 
 Stdlib only: the 3×3 normal equations are solved by Gaussian elimination.
 """
@@ -109,11 +111,13 @@ def build_dataset(
     config: ModelConfig,
     now_ts: float,
     use_outdoor: bool | None = None,
+    skip: list[bool] | None = None,
 ) -> Dataset:
     """Turn the grid into regression rows, dropping gaps, exclusions and glitches.
 
     ``use_outdoor=None`` decides automatically: outdoor mode when at least half of the
-    usable rows (and ≥ 3 h) have an outdoor value.
+    usable rows (and ≥ 3 h) have an outdoor value. ``skip`` marks further rows not to
+    learn from (thermostat regulation, see :func:`episodes.regulation_mask`).
     """
     dt_h = grid.step_minutes / 60.0
     ind, out, exc = grid.indoor, grid.outdoor, grid.excluded
@@ -123,6 +127,8 @@ def build_dataset(
         t0 = ind[k]
         t1 = ind[k + 1]
         if t0 is None or t1 is None or exc[k] or exc[k + 1]:
+            continue
+        if skip is not None and skip[k]:
             continue
         if abs(t1 - t0) > max_dt:
             continue

@@ -63,6 +63,7 @@ from .const import (
     STATUS_NO_TEMPERATURE,
     STATUS_OK,
     STATUS_UNREACHABLE,
+    STATUS_UNRELIABLE,
     TARGET_MODE_CLIMATE,
     UNREACHABLE_MARGIN_K,
 )
@@ -429,6 +430,8 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             status = STATUS_LEARNING
         elif estimate.reason.get("status") == "no_outdoor":
             status = STATUS_NO_OUTDOOR
+        elif estimate.reason.get("status") == "unreliable":
+            status = STATUS_UNRELIABLE
         elif not estimate.reachable:
             status = STATUS_UNREACHABLE
         elif estimate.minutes is None:
@@ -490,7 +493,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         if estimate.minutes is None:
             if (
                 estimate.reachable
-                or estimate.reason.get("status") == "no_outdoor"
+                or estimate.reason.get("status") in ("no_outdoor", "unreliable")
                 or estimate.max_reachable_c is None
             ):
                 return None
