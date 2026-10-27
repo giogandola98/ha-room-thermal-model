@@ -20,7 +20,8 @@ from .base import (
 )
 from .cooling import cooling_tau
 from .deadtime import tangent_dead_time
-from .fit import FitResult, build_dataset, fit_rc
+from .episodes import episode_heating_rate, regulation_mask
+from .fit import Dataset, FitResult, build_dataset, fit_rc
 from .forecast import mean_over, outdoor_curve, solve_duration
 from .grid import Grid, ceil_ts, dt_of, floor_ts, resample, ts_of
 from .physics import coast_temperature, equilibrium, preheat_minutes
@@ -39,6 +40,9 @@ MIN_QUALITY_HOURS = 12.0  # usable data needed for a holdout evaluation
 REFIT_SECONDS = 3600.0
 WEAK_EXCITATION_HOURS = 3.0
 OUTDOOR_REF_HOURS = 24.0
+EPISODE_DISAGREEMENT = 0.3  # relative gap between fitted and episode ``a`` that triggers it
+PLAUSIBLE_MAX_RISE_K = 50.0  # full-effort equilibrium above outdoor (radiators: ~20-35 K)
+NO_OUTDOOR_MEAN_C = 15.0  # no outdoor data: c absorbs b·mean(Tout); allow for it
 
 
 def _r(v: float | None, nd: int = 4) -> float | None:
@@ -174,7 +178,8 @@ class RCThermalModel(ThermalModel):
         # fit runs in an executor while samples keep arriving: work on a snapshot
         grid = self._grid.snapshot()
         self._data_end_at_fit = grid.end_ts
-        ds = build_dataset(grid, cfg, now_ts)
+        regulation = regulation_mask(grid)
+        ds = build_dataset(grid, cfg, now_ts, skip=regulation)
         if len(ds) * ds.dt_h < MIN_FIT_HOURS:
             self._summary = {"status": "insufficient_data", "rows": len(ds)}
             return dict(self._summary)
@@ -200,16 +205,24 @@ class RCThermalModel(ThermalModel):
         if weak and tangent is not None:
             d_steps = min(dmax, max(0, round(tangent.minutes / step)))
             fallbacks.append("dead_time_from_tangent")
-        if weak and cool is not None:
+        b_unidentified = "b" in res.projected
+        if (weak or b_unidentified) and cool is not None:
             fixed[1] = 1.0 / cool.tau_hours
             fallbacks.append("loss_rate_from_cooling")
         if fallbacks:
-            res2 = fit_rc(
-                ds, grid.effort, cfg, d_candidates=[d_steps], fixed=fixed, scale=res.scale
-            )
-            if res2 is not None:
-                res2.criterion, res2.flatness = res.criterion, res.flatness
-                res = res2
+            res = self._refit(ds, grid, res, d_steps, fixed)
+
+        # full-effort heating rate measured on real heat-up episodes
+        episode = episode_heating_rate(grid, res.b, res.c, res.d_steps, ds.use_outdoor)
+        if episode is not None and episode.a_k_per_h > 0:
+            gap = abs(res.a - episode.a_k_per_h) / episode.a_k_per_h
+            if gap > EPISODE_DISAGREEMENT:
+                fixed[0] = episode.a_k_per_h
+                fixed[1] = res.b
+                fallbacks.append("heating_rate_from_episodes")
+                res = self._refit(ds, grid, res, res.d_steps, fixed)
+
+        reliable, unreliable_reason = self._plausible(res, ds.use_outdoor, fixed)
 
         # holdout evaluation with parameters fitted on the first 80 %
         evaluation = None
@@ -230,11 +243,12 @@ class RCThermalModel(ThermalModel):
             "c": res.c,
             "d_minutes": res.d_steps * step,
             "use_outdoor": ds.use_outdoor,
+            "reliable": reliable,
         }
         self._outdoor_ref = self._recent_outdoor()
         rmse = evaluation.rmse if evaluation else None
         base = evaluation.baseline_rmse if evaluation else None
-        mat = maturity(heat_h, cool_h, rmse, base)
+        mat = maturity(heat_h, cool_h, rmse, base) if reliable else 0.0
         self._quality = {
             "maturity": mat,
             "samples": grid.valid_indoor_count(),
@@ -259,6 +273,18 @@ class RCThermalModel(ThermalModel):
             **self._fit_dict(res),
             "time_constant_h": round(1.0 / res.b, 3),
             "fallbacks": fallbacks,
+            "reliable": reliable,
+            "unreliable_reason": unreliable_reason,
+            "regulation_rows_skipped": sum(regulation),
+            "episode_heating_rate": (
+                {
+                    "a_k_per_h": round(episode.a_k_per_h, 4),
+                    "episodes": episode.episodes,
+                    "rates": episode.rates,
+                }
+                if episode is not None
+                else None
+            ),
             "cross_check": cross,
             "quality": {k: _r(v) if isinstance(v, float) else v for k, v in self._quality.items()},
             "evaluation_windows": evaluation.windows if evaluation else 0,
@@ -266,6 +292,31 @@ class RCThermalModel(ThermalModel):
             "fit_seconds": round(time.perf_counter() - t_start, 3),
         }
         return dict(self._summary)
+
+    def _refit(
+        self, ds: Dataset, grid: Grid, res: FitResult, d_steps: int, fixed: dict[int, float]
+    ) -> FitResult:
+        """Refit with some parameters fixed, keeping the dead-time diagnostics."""
+        res2 = fit_rc(
+            ds, grid.effort, self.config, d_candidates=[d_steps], fixed=fixed, scale=res.scale
+        )
+        if res2 is None:
+            return res
+        res2.criterion, res2.flatness = res.criterion, res.flatness
+        return res2
+
+    def _plausible(
+        self, res: FitResult, use_outdoor: bool, fixed: dict[int, float]
+    ) -> tuple[bool, str | None]:
+        """Physical sanity of the fitted parameters (an unreliable model gives no preheat)."""
+        if "b" in res.projected and 1 not in fixed:
+            return False, "loss_rate_unidentified"
+        # (a + c)/b: how far above the outdoor (or the learnt mean) full heating settles
+        if equilibrium(0.0, res.a, res.b, res.c) > PLAUSIBLE_MAX_RISE_K + (
+            0.0 if use_outdoor else NO_OUTDOOR_MEAN_C
+        ):
+            return False, "max_reachable_implausible"
+        return True, None
 
     def _fit_dict(self, res: FitResult) -> dict[str, Any]:
         d = res.as_dict(self.config.step_minutes)
@@ -336,6 +387,10 @@ class RCThermalModel(ThermalModel):
             "time_constant_h": 1.0 / b,
             "outdoor_source": source,
         }
+        if not p.get("reliable", True):
+            reason["status"] = "unreliable"
+            reason["unreliable_reason"] = self._summary.get("unreliable_reason")
+            return PreheatEstimate(None, False, target_c, start_c, None, None, reason)
         if outdoor_for is None:
             reason["status"] = "no_outdoor"
             return PreheatEstimate(None, False, target_c, start_c, None, None, reason)
@@ -424,6 +479,7 @@ class RCThermalModel(ThermalModel):
                 "c": float(params["c"]),
                 "d_minutes": float(params["d_minutes"]),
                 "use_outdoor": bool(params["use_outdoor"]),
+                "reliable": bool(params.get("reliable", True)),
             }
         model._outdoor_ref = data.get("outdoor_ref")
         model._quality = data.get("quality")

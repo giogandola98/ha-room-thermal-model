@@ -87,6 +87,7 @@ STATUS_NO_TEMPERATURE: Final = "no_temperature"
 STATUS_UNREACHABLE: Final = "unreachable"
 STATUS_NO_OUTDOOR: Final = "no_outdoor"
 STATUS_AT_TARGET: Final = "at_target"
+STATUS_UNRELIABLE: Final = "unreliable"  # learnt parameters are physically implausible
 
 # Service fields
 ATTR_CONFIG_ENTRY_ID: Final = "config_entry_id"

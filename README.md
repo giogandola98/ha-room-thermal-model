@@ -29,6 +29,16 @@ it to the outside (a lumped *RC* model), on a 5-minute grid:
   least-squares fit down-weights anomalies such as an open window, and recent data
   weighs more (half-life 21 days). On first start the recorder history is imported, so
   the model is useful from day one if you have a few days of history.
+- **Thermostatic valves**: a thermostat (or Versatile Thermostat over TRVs) keeps
+  reporting `heating` for hours while the valve only trickles to hold the setpoint, or
+  while the boiler is idle. Inside every heating period, the part after the room reached
+  its highest temperature is therefore not learnt from. The full heating power is also
+  measured directly on real heat-ups (the room was idle, then warmed up); when the
+  regression disagrees by more than 30 %, that measured rate is used. When the data
+  cannot identify the heat loss, the time constant comes from free-cooling periods.
+- **Plausibility**: if the learnt parameters are physically implausible (full heating
+  would settle more than 50 K above the outdoor temperature, or the heat loss cannot be
+  identified) the zone reports **unreliable**: no preheat value, maturity 0.
 - **Preheat minutes** come from the exact solution of the model. The heat takes the dead
   time `d` to arrive, so the room first coasts (no heating) for `d` minutes to a
   temperature `T_d`; then `t = d + τ · ln((T∞ − T_d) / (T∞ − T_target))`. `T∞` is the
@@ -85,9 +95,10 @@ When the target is unreachable, `sensor.<zone>_preheat_minutes` stays unknown wi
 `unreachable`, while preheat start and preheat now still work as described above.
 
 The `reason` attribute of the preheat sensors explains why there is no value: for example
-`unreachable` (the target is above the max reachable temperature) or `no_outdoor` (the
+`unreachable` (the target is above the max reachable temperature), `no_outdoor` (the
 model needs outdoor data but none is available: no sensor, no forecast and no reference
-learnt yet).
+learnt yet) or `unreliable` (the learnt parameters failed the plausibility check; the
+diagnostics show `unreliable_reason`).
 
 Changing the input sensors via **Reconfigure** discards the learnt model and re-imports
 the history automatically.
