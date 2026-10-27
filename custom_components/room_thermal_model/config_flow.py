@@ -24,6 +24,7 @@ from .const import (
     CONF_CLIMATE,
     CONF_EFFORT_SENSOR,
     CONF_HALF_LIFE_DAYS,
+    CONF_HEAT_SOURCE,
     CONF_HISTORY_DAYS,
     CONF_OUTDOOR_SENSOR,
     CONF_ROOM_SENSOR,
@@ -54,6 +55,7 @@ from .const import (
 OPTIONAL_INPUTS = (
     CONF_ROOM_SENSOR,
     CONF_EFFORT_SENSOR,
+    CONF_HEAT_SOURCE,
     CONF_OUTDOOR_SENSOR,
     CONF_WEATHER,
     CONF_ARRIVAL_SENSOR,
@@ -93,6 +95,9 @@ def _input_fields(include_climate: bool) -> dict[Any, Any]:
             ),
             vol.Optional(CONF_EFFORT_SENSOR): EntitySelector(
                 EntitySelectorConfig(domain=["sensor", "number", "input_number"])
+            ),
+            vol.Optional(CONF_HEAT_SOURCE): EntitySelector(
+                EntitySelectorConfig(domain=["binary_sensor", "switch", "input_boolean", "sensor"])
             ),
             vol.Optional(CONF_OUTDOOR_SENSOR): EntitySelector(
                 EntitySelectorConfig(domain="sensor", device_class="temperature")

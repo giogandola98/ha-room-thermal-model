@@ -11,6 +11,9 @@ Rules:
 
 * indoor temperature: the room sensor when configured (no mixing: an unavailable room
   sensor gives no indoor value), else the climate ``current_temperature``;
+* heat source (optional): the boiler / heat pump really producing heat (on/off entity,
+  or a numeric sensor such as the burner power: > 0 = on). The effort counts only while
+  it is on: off → 0, unknown → not observed;
 * heating effort: the effort sensor (% → 0..1, clamped) when it has a valid value, else
   ``hvac_action`` (``heating``/``preheating`` = 1, ``idle``/``off``/``fan``/``drying``/
   ``defrosting``/``cooling`` = 0, ``None`` or an unknown action = not observed). A climate
@@ -36,6 +39,7 @@ from homeassistant.const import (
     ATTR_TEMPERATURE,
     ATTR_UNIT_OF_MEASUREMENT,
     STATE_OFF,
+    STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UnitOfTemperature,
@@ -47,6 +51,7 @@ from .const import (
     CONF_ARRIVAL_SENSOR,
     CONF_CLIMATE,
     CONF_EFFORT_SENSOR,
+    CONF_HEAT_SOURCE,
     CONF_OUTDOOR_SENSOR,
     CONF_ROOM_SENSOR,
     CONF_WEATHER,
@@ -69,6 +74,7 @@ class ZoneInputs:
     climate: str
     room_sensor: str | None = None
     effort_sensor: str | None = None
+    heat_source: str | None = None
     outdoor_sensor: str | None = None
     weather: str | None = None
     arrival_sensor: str | None = None
@@ -80,6 +86,7 @@ class ZoneInputs:
             climate=data[CONF_CLIMATE],
             room_sensor=data.get(CONF_ROOM_SENSOR) or None,
             effort_sensor=data.get(CONF_EFFORT_SENSOR) or None,
+            heat_source=data.get(CONF_HEAT_SOURCE) or None,
             outdoor_sensor=data.get(CONF_OUTDOOR_SENSOR) or None,
             weather=data.get(CONF_WEATHER) or None,
             arrival_sensor=data.get(CONF_ARRIVAL_SENSOR) or None,
@@ -94,6 +101,7 @@ class ZoneInputs:
                 self.climate,
                 self.room_sensor,
                 self.effort_sensor,
+                self.heat_source,
                 self.outdoor_sensor,
                 self.weather,
             )
@@ -231,10 +239,34 @@ def outdoor_temperature(
     return value
 
 
+def heat_source_on(state: State | None) -> bool | None:
+    """Heat source producing heat: on/off states, or a number > 0. None when unknown."""
+    if not _valid(state):
+        return None
+    assert state is not None
+    if state.state in (STATE_ON, STATE_OFF):
+        return state.state == STATE_ON
+    value = to_float(state.state)
+    return None if value is None else value > 0
+
+
 def heating_effort(
     inputs: ZoneInputs, states: dict[str, State | None], system_unit: str
 ) -> float | None:
-    """Heating effort in [0, 1] (sensor, else derived from the climate)."""
+    """Heating effort in [0, 1] (sensor, else derived from the climate), gated by the
+    heat source when one is configured."""
+    effort = _room_effort(inputs, states, system_unit)
+    if inputs.heat_source is None or effort is None or effort == 0.0:
+        return effort
+    on = heat_source_on(states.get(inputs.heat_source))
+    if on is None:
+        return None
+    return effort if on else 0.0
+
+
+def _room_effort(
+    inputs: ZoneInputs, states: dict[str, State | None], system_unit: str
+) -> float | None:
     if inputs.effort_sensor:
         value = effort_from_sensor(states.get(inputs.effort_sensor))
         if value is not None:

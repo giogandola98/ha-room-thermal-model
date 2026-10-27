@@ -9,6 +9,7 @@
           "climate_entity": "Thermostat (climate)",
           "room_temperature_sensor": "Raumtemperatursensor",
           "heating_effort_sensor": "Heizleistungssensor",
+          "heat_source_entity": "Wärmequelle",
           "outdoor_temperature_sensor": "Außentemperatursensor",
           "weather_entity": "Wetter-Entität",
           "arrival_sensor": "Ankunftszeitsensor",
@@ -20,6 +21,7 @@
           "climate_entity": "Climate-Entität der Zone. Verwendet current_temperature, hvac_action, temperature (Ziel) und den HVAC-Modus.",
           "room_temperature_sensor": "Optional. Ersetzt die current_temperature des Thermostats (z. B. ein Sensor fern vom Heizkörper).",
           "heating_effort_sensor": "Optional. Heizbedarf in % (0-100), z. B. Ventilöffnung. Ohne ihn wird der Bedarf aus hvac_action abgeleitet (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Optional. Entität, die an ist, solange der Kessel / die Wärmepumpe tatsächlich Wärme erzeugt (z. B. Binärsensor „Heizung aktiv“ des Kessels oder die Brennerleistung: > 0 = an). Das Thermostat meldet oft Heizen bei stehendem Kessel; damit zählt Heizen nur bei laufender Wärmequelle.",
           "outdoor_temperature_sensor": "Optional. Aktuelle Außentemperatur (der Verlauf wird zum Lernen verwendet).",
           "weather_entity": "Optional. Vorhersage für das Vorheizfenster (stündlich, sonst zweimal täglich, sonst täglich) und Außentemperatur, wenn kein Außensensor gesetzt ist.",
           "arrival_sensor": "Optional. Zeitstempelsensor mit der erwarteten Ankunft (z. B. sensor.house_next_return_eta von Home Return Predictor): aktiviert die Entitäten Vorheizbeginn und Jetzt vorheizen.",
@@ -34,6 +36,7 @@
           "zone_name": "Zonenname",
           "room_temperature_sensor": "Raumtemperatursensor",
           "heating_effort_sensor": "Heizleistungssensor",
+          "heat_source_entity": "Wärmequelle",
           "outdoor_temperature_sensor": "Außentemperatursensor",
           "weather_entity": "Wetter-Entität",
           "arrival_sensor": "Ankunftszeitsensor"
@@ -42,6 +45,7 @@
           "zone_name": "Name der Zone (Raum oder Heizzone); wird auch für die Entitäts-IDs verwendet.",
           "room_temperature_sensor": "Optional. Ersetzt die current_temperature des Thermostats (z. B. ein Sensor fern vom Heizkörper).",
           "heating_effort_sensor": "Optional. Heizbedarf in % (0-100), z. B. Ventilöffnung. Ohne ihn wird der Bedarf aus hvac_action abgeleitet (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Optional. Entität, die an ist, solange der Kessel / die Wärmepumpe tatsächlich Wärme erzeugt (z. B. Binärsensor „Heizung aktiv“ des Kessels oder die Brennerleistung: > 0 = an). Das Thermostat meldet oft Heizen bei stehendem Kessel; damit zählt Heizen nur bei laufender Wärmequelle.",
           "outdoor_temperature_sensor": "Optional. Aktuelle Außentemperatur (der Verlauf wird zum Lernen verwendet).",
           "weather_entity": "Optional. Vorhersage für das Vorheizfenster (stündlich, sonst zweimal täglich, sonst täglich) und Außentemperatur, wenn kein Außensensor gesetzt ist.",
           "arrival_sensor": "Optional. Zeitstempelsensor mit der erwarteten Ankunft (z. B. sensor.house_next_return_eta von Home Return Predictor): aktiviert die Entitäten Vorheizbeginn und Jetzt vorheizen."

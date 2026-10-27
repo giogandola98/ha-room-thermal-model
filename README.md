@@ -71,6 +71,7 @@ Settings → Devices & services → Add integration → **Room Thermal Model**.
 | Climate entity | yes | `current_temperature`, `hvac_action`, target `temperature`, HVAC mode |
 | Room temperature sensor | no | overrides the climate's temperature (e.g. a sensor away from the radiator) |
 | Heating effort sensor (%) | no | valve opening / heating demand 0–100 %; otherwise `hvac_action` is used (heating = 100 %, idle/off = 0 %); if the climate has no `hvac_action`, "mode on and target > current" |
+| Heat source | no | on while the boiler / heat pump really produces heat (binary sensor, switch, or a numeric sensor such as the burner power: > 0 = on). Recommended with a central boiler: thermostats often report `heating` while the boiler is idle. Heating counts only while it is on |
 | Outdoor temperature sensor | no | current value and history |
 | Weather entity | no | forecast for the preheat window (hourly → twice daily → daily) and outdoor fallback |
 | Arrival sensor | no | any timestamp sensor (e.g. `sensor.house_next_return_eta` from [Home Return Predictor](https://github.com/giogandola98/ha-home-return-predictor)); enables preheat start / preheat now |

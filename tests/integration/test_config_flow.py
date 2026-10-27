@@ -11,6 +11,7 @@ from custom_components.room_thermal_model.const import (
     CONF_CLIMATE,
     CONF_EFFORT_SENSOR,
     CONF_HALF_LIFE_DAYS,
+    CONF_HEAT_SOURCE,
     CONF_HISTORY_DAYS,
     CONF_OUTDOOR_SENSOR,
     CONF_ROOM_SENSOR,
@@ -175,3 +176,19 @@ async def test_reconfigure(hass: HomeAssistant) -> None:
         CONF_CLIMATE: CLIMATE,
         CONF_OUTDOOR_SENSOR: OUTDOOR,
     }
+
+
+async def test_reconfigure_adds_heat_source(hass: HomeAssistant) -> None:
+    """The heat source is an optional input of the zone (stored in the entry data)."""
+    set_inputs(hass)
+    hass.states.async_set("binary_sensor.boiler_heating", "off")
+    entry = await setup_entry(hass, make_entry(hass))
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ZONE_NAME: "Living", CONF_HEAT_SOURCE: "binary_sensor.boiler_heating"},
+    )
+    await hass.async_block_till_done()
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_HEAT_SOURCE] == "binary_sensor.boiler_heating"
+    assert "binary_sensor.boiler_heating" in entry.runtime_data.inputs.sample_entities

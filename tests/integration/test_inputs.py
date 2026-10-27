@@ -12,6 +12,7 @@ from custom_components.room_thermal_model.inputs import (
     ZoneInputs,
     build_sample,
     effort_from_climate,
+    heat_source_on,
     heating_effort,
     indoor_temperature,
     outdoor_temperature,
@@ -74,6 +75,40 @@ def test_effort_sensor_preferred_and_clamped() -> None:
     for raw, expected in (("40", 0.4), ("150", 1.0), ("-5", 0.0), ("unavailable", 1.0)):
         states = {CLIMATE: climate, EFFORT: State(EFFORT, raw)}
         assert heating_effort(inputs, states, C) == pytest.approx(expected)
+
+
+BOILER = "binary_sensor.boiler_heating"
+BURNER = "sensor.burner_power"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("on", True), ("off", False), ("35", True), ("0", False), ("unavailable", None), ("x", None)],
+)
+def test_heat_source_on(raw, expected) -> None:
+    """On/off entities and numeric sensors (> 0 = on); unknown → None."""
+    assert heat_source_on(State(BOILER, raw)) is expected
+
+
+def test_heat_source_gates_effort() -> None:
+    """Heating counts only while the heat source is on; unknown source → not observed."""
+    inputs = ZoneInputs(climate=CLIMATE, heat_source=BOILER)
+    heating = _climate(action="heating")
+    assert heating_effort(inputs, {CLIMATE: heating, BOILER: State(BOILER, "on")}, C) == 1.0
+    assert heating_effort(inputs, {CLIMATE: heating, BOILER: State(BOILER, "off")}, C) == 0.0
+    assert heating_effort(inputs, {CLIMATE: heating, BOILER: None}, C) is None
+    idle = _climate(action="idle")
+    assert heating_effort(inputs, {CLIMATE: idle, BOILER: None}, C) == 0.0
+    assert BOILER in inputs.sample_entities  # its history is imported too
+
+
+def test_heat_source_numeric_with_effort_sensor() -> None:
+    """A burner power sensor gates an effort sensor."""
+    inputs = ZoneInputs(climate=CLIMATE, effort_sensor=EFFORT, heat_source=BURNER)
+    states = {CLIMATE: _climate(), EFFORT: State(EFFORT, "60"), BURNER: State(BURNER, "40")}
+    assert heating_effort(inputs, states, C) == pytest.approx(0.6)
+    states[BURNER] = State(BURNER, "0")
+    assert heating_effort(inputs, states, C) == 0.0
 
 
 def test_unavailable_climate_gives_no_effort() -> None:

@@ -9,6 +9,7 @@
           "climate_entity": "Thermostat (climate)",
           "room_temperature_sensor": "Capteur de température de la pièce",
           "heating_effort_sensor": "Capteur de demande de chauffage",
+          "heat_source_entity": "Source de chaleur",
           "outdoor_temperature_sensor": "Capteur de température extérieure",
           "weather_entity": "Entité météo",
           "arrival_sensor": "Capteur d'heure d'arrivée",
@@ -20,6 +21,7 @@
           "climate_entity": "Entité climate de la zone. Utilise current_temperature, hvac_action, temperature (consigne) et le mode HVAC.",
           "room_temperature_sensor": "Facultatif. Remplace le current_temperature du thermostat (par ex. un capteur éloigné du radiateur).",
           "heating_effort_sensor": "Facultatif. Demande de chauffage en % (0-100), par ex. ouverture de vanne. Sans lui, la demande provient de hvac_action (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Facultatif. Entité active pendant que la chaudière / pompe à chaleur produit réellement de la chaleur (ex. capteur binaire « chauffage actif » de la chaudière, ou puissance du brûleur : > 0 = actif). Le thermostat signale souvent un chauffage alors que la chaudière est à l'arrêt ; avec cette entité, le chauffage ne compte que lorsque la source est active.",
           "outdoor_temperature_sensor": "Facultatif. Température extérieure actuelle (l'historique sert à l'apprentissage).",
           "weather_entity": "Facultatif. Prévisions pour la fenêtre de préchauffage (horaires, sinon biquotidiennes, sinon quotidiennes) et température extérieure en l'absence de capteur extérieur.",
           "arrival_sensor": "Facultatif. Capteur horodaté avec l'arrivée prévue (par ex. sensor.house_next_return_eta de Home Return Predictor) : active les entités début du préchauffage et préchauffer maintenant.",
@@ -34,6 +36,7 @@
           "zone_name": "Nom de la zone",
           "room_temperature_sensor": "Capteur de température de la pièce",
           "heating_effort_sensor": "Capteur de demande de chauffage",
+          "heat_source_entity": "Source de chaleur",
           "outdoor_temperature_sensor": "Capteur de température extérieure",
           "weather_entity": "Entité météo",
           "arrival_sensor": "Capteur d'heure d'arrivée"
@@ -42,6 +45,7 @@
           "zone_name": "Nom de la zone (pièce ou zone de chauffage) ; également utilisé pour les ID d'entité.",
           "room_temperature_sensor": "Facultatif. Remplace le current_temperature du thermostat (par ex. un capteur éloigné du radiateur).",
           "heating_effort_sensor": "Facultatif. Demande de chauffage en % (0-100), par ex. ouverture de vanne. Sans lui, la demande provient de hvac_action (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Facultatif. Entité active pendant que la chaudière / pompe à chaleur produit réellement de la chaleur (ex. capteur binaire « chauffage actif » de la chaudière, ou puissance du brûleur : > 0 = actif). Le thermostat signale souvent un chauffage alors que la chaudière est à l'arrêt ; avec cette entité, le chauffage ne compte que lorsque la source est active.",
           "outdoor_temperature_sensor": "Facultatif. Température extérieure actuelle (l'historique sert à l'apprentissage).",
           "weather_entity": "Facultatif. Prévisions pour la fenêtre de préchauffage (horaires, sinon biquotidiennes, sinon quotidiennes) et température extérieure en l'absence de capteur extérieur.",
           "arrival_sensor": "Facultatif. Capteur horodaté avec l'arrivée prévue (par ex. sensor.house_next_return_eta de Home Return Predictor) : active les entités début du préchauffage et préchauffer maintenant."
