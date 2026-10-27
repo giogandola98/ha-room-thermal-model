@@ -9,6 +9,7 @@
           "climate_entity": "Termostato (climate)",
           "room_temperature_sensor": "Sensore temperatura stanza",
           "heating_effort_sensor": "Sensore sforzo di riscaldamento",
+          "heat_source_entity": "Fonte di calore",
           "outdoor_temperature_sensor": "Sensore temperatura esterna",
           "weather_entity": "Entità meteo",
           "arrival_sensor": "Sensore orario di arrivo",
@@ -20,6 +21,7 @@
           "climate_entity": "Entità climate della zona. Usa current_temperature, hvac_action, temperature (obiettivo) e la modalità HVAC.",
           "room_temperature_sensor": "Facoltativo. Sostituisce la current_temperature del termostato (es. un sensore lontano dal radiatore).",
           "heating_effort_sensor": "Facoltativo. Richiesta di calore in % (0-100), es. apertura valvola. Senza, lo sforzo deriva da hvac_action (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Facoltativo. Entità accesa mentre la caldaia / pompa di calore produce davvero calore (es. il sensore binario 'riscaldamento attivo' della caldaia, o la potenza del bruciatore: > 0 = acceso). Il termostato spesso segnala riscaldamento a caldaia ferma; con questa entità il riscaldamento conta solo a fonte accesa.",
           "outdoor_temperature_sensor": "Facoltativo. Temperatura esterna attuale (lo storico viene usato per l'apprendimento).",
           "weather_entity": "Facoltativo. Previsione per la finestra di preriscaldamento (oraria, altrimenti due volte al giorno, altrimenti giornaliera) e temperatura esterna quando manca il sensore esterno.",
           "arrival_sensor": "Facoltativo. Sensore timestamp con l'arrivo previsto (es. sensor.house_next_return_eta di Home Return Predictor): abilita le entità inizio preriscaldamento e preriscalda ora.",
@@ -34,6 +36,7 @@
           "zone_name": "Nome della zona",
           "room_temperature_sensor": "Sensore temperatura stanza",
           "heating_effort_sensor": "Sensore sforzo di riscaldamento",
+          "heat_source_entity": "Fonte di calore",
           "outdoor_temperature_sensor": "Sensore temperatura esterna",
           "weather_entity": "Entità meteo",
           "arrival_sensor": "Sensore orario di arrivo"
@@ -42,6 +45,7 @@
           "zone_name": "Nome della zona (stanza o zona di riscaldamento); usato anche per gli ID delle entità.",
           "room_temperature_sensor": "Facoltativo. Sostituisce la current_temperature del termostato (es. un sensore lontano dal radiatore).",
           "heating_effort_sensor": "Facoltativo. Richiesta di calore in % (0-100), es. apertura valvola. Senza, lo sforzo deriva da hvac_action (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Facoltativo. Entità accesa mentre la caldaia / pompa di calore produce davvero calore (es. il sensore binario 'riscaldamento attivo' della caldaia, o la potenza del bruciatore: > 0 = acceso). Il termostato spesso segnala riscaldamento a caldaia ferma; con questa entità il riscaldamento conta solo a fonte accesa.",
           "outdoor_temperature_sensor": "Facoltativo. Temperatura esterna attuale (lo storico viene usato per l'apprendimento).",
           "weather_entity": "Facoltativo. Previsione per la finestra di preriscaldamento (oraria, altrimenti due volte al giorno, altrimenti giornaliera) e temperatura esterna quando manca il sensore esterno.",
           "arrival_sensor": "Facoltativo. Sensore timestamp con l'arrivo previsto (es. sensor.house_next_return_eta di Home Return Predictor): abilita le entità inizio preriscaldamento e preriscalda ora."

@@ -9,6 +9,7 @@
           "climate_entity": "Thermostat (climate)",
           "room_temperature_sensor": "Room temperature sensor",
           "heating_effort_sensor": "Heating effort sensor",
+          "heat_source_entity": "Heat source",
           "outdoor_temperature_sensor": "Outdoor temperature sensor",
           "weather_entity": "Weather entity",
           "arrival_sensor": "Arrival time sensor",
@@ -20,6 +21,7 @@
           "climate_entity": "Climate entity of the zone. Uses current_temperature, hvac_action, temperature (target) and the HVAC mode.",
           "room_temperature_sensor": "Optional. Replaces the thermostat's current_temperature (e.g. a sensor away from the radiator).",
           "heating_effort_sensor": "Optional. Heating demand in % (0-100), e.g. valve opening. Without it the effort comes from hvac_action (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Optional. Entity that is on while the boiler / heat pump really produces heat (e.g. a boiler 'heating active' binary sensor, or the burner power: > 0 = on). The thermostat often reports heating while the boiler is idle; with this set, heating counts only while the heat source is on.",
           "outdoor_temperature_sensor": "Optional. Current outdoor temperature (history is used for learning).",
           "weather_entity": "Optional. Forecast for the preheat window (hourly, else twice daily, else daily) and outdoor temperature when no outdoor sensor is set.",
           "arrival_sensor": "Optional. Timestamp sensor with the expected arrival (e.g. sensor.house_next_return_eta from Home Return Predictor): enables the preheat start and preheat now entities.",
@@ -34,6 +36,7 @@
           "zone_name": "Zone name",
           "room_temperature_sensor": "Room temperature sensor",
           "heating_effort_sensor": "Heating effort sensor",
+          "heat_source_entity": "Heat source",
           "outdoor_temperature_sensor": "Outdoor temperature sensor",
           "weather_entity": "Weather entity",
           "arrival_sensor": "Arrival time sensor"
@@ -42,6 +45,7 @@
           "zone_name": "Name of the zone (room or heating zone); also used for the entity IDs.",
           "room_temperature_sensor": "Optional. Replaces the thermostat's current_temperature (e.g. a sensor away from the radiator).",
           "heating_effort_sensor": "Optional. Heating demand in % (0-100), e.g. valve opening. Without it the effort comes from hvac_action (heating = 100 %, idle/off = 0 %).",
+          "heat_source_entity": "Optional. Entity that is on while the boiler / heat pump really produces heat (e.g. a boiler 'heating active' binary sensor, or the burner power: > 0 = on). The thermostat often reports heating while the boiler is idle; with this set, heating counts only while the heat source is on.",
           "outdoor_temperature_sensor": "Optional. Current outdoor temperature (history is used for learning).",
           "weather_entity": "Optional. Forecast for the preheat window (hourly, else twice daily, else daily) and outdoor temperature when no outdoor sensor is set.",
           "arrival_sensor": "Optional. Timestamp sensor with the expected arrival (e.g. sensor.house_next_return_eta from Home Return Predictor): enables the preheat start and preheat now entities."

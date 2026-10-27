@@ -12,6 +12,7 @@ CONF_ZONE_NAME: Final = "zone_name"
 CONF_CLIMATE: Final = "climate_entity"
 CONF_ROOM_SENSOR: Final = "room_temperature_sensor"  # optional
 CONF_EFFORT_SENSOR: Final = "heating_effort_sensor"  # optional, %
+CONF_HEAT_SOURCE: Final = "heat_source_entity"  # optional, boiler/heat pump really heating
 CONF_OUTDOOR_SENSOR: Final = "outdoor_temperature_sensor"  # optional
 CONF_WEATHER: Final = "weather_entity"  # optional, forecast (+ outdoor fallback)
 CONF_ARRIVAL_SENSOR: Final = "arrival_sensor"  # optional timestamp sensor
