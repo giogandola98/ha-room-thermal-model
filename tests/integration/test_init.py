@@ -76,7 +76,9 @@ async def test_entity_ids_without_arrival(hass: HomeAssistant, fake_model: None)
     for entity in entities:
         is_diag = entity.unique_id.removeprefix(f"{entry.entry_id}_") in diag
         assert (entity.entity_category is not None) == is_diag
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, entry.entry_id), entry.entry_id
+    )
     assert device is not None
     assert device.name == ZONE
     assert device.entry_type is dr.DeviceEntryType.SERVICE
