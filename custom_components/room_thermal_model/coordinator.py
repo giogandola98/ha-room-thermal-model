@@ -62,6 +62,7 @@ from .const import (
     STATUS_NO_OUTDOOR,
     STATUS_NO_TEMPERATURE,
     STATUS_OK,
+    STATUS_SETPOINT_BELOW_CURRENT,
     STATUS_UNREACHABLE,
     STATUS_UNRELIABLE,
     TARGET_MODE_CLIMATE,
@@ -73,6 +74,7 @@ from .inputs import (
     INVALID_STATES,
     ZoneInputs,
     build_sample,
+    climate_max_temp,
     climate_target,
 )
 from .rtm_core import create_model
@@ -404,6 +406,8 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         arrival = parse_arrival(arrival_state, now)
         indoor = current.indoor_c
         outdoor = current.outdoor_c
+        # the climate's max setpoint caps the maximum reachable temperature
+        max_c = climate_max_temp(self.hass.states.get(self.inputs.climate), self.system_unit)
         estimate: PreheatEstimate | None = None
         coast_c: float | None = None
         lead: float | None = None
@@ -412,12 +416,12 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
                 parameters = self.model.parameters()
                 quality = self.model.quality()
                 if indoor is not None and parameters is not None:
-                    estimate = self.model.preheat(now, indoor, target_c, outdoor, forecast)
+                    estimate = self.model.preheat(now, indoor, target_c, outdoor, forecast, max_c)
                     if arrival is not None:
                         minutes = (arrival - now).total_seconds() / 60.0
                         coast_c = self.model.coast(now, indoor, minutes, outdoor, forecast)
                         lead = self._lead_minutes(
-                            now, indoor, target_c, outdoor, forecast, estimate, minutes
+                            now, indoor, target_c, outdoor, forecast, estimate, minutes, max_c
                         )
         except MODEL_ERRORS as err:
             raise UpdateFailed(
@@ -437,6 +441,9 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             status = STATUS_UNREACHABLE
         elif estimate.minutes is None:
             status = STATUS_LEARNING
+        elif target_source == TARGET_MODE_CLIMATE and indoor > target_c:
+            # a setback setpoint never asks for a preheat (see README)
+            status = STATUS_SETPOINT_BELOW_CURRENT
         elif estimate.minutes <= 0 or indoor >= target_c:
             status = STATUS_AT_TARGET
         else:
@@ -485,6 +492,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         forecast: list[ForecastPoint],
         estimate: PreheatEstimate,
         total: float,
+        max_c: float | None = None,
     ) -> float | None:
         """Minutes before the arrival at which heating must start (model lock held).
 
@@ -504,10 +512,14 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
                 return None
             goal = estimate.max_reachable_c - UNREACHABLE_MARGIN_K
             # already near the maximum: lead 0, the loop still accounts for the cooling
-            estimate = self.model.preheat(now, indoor, goal, outdoor, forecast)
+            estimate = self.model.preheat(now, indoor, goal, outdoor, forecast, max_c)
             if estimate.minutes is None:
                 return total
         lead = max(0.0, estimate.minutes)
+        # From a future start the forecast describes the outdoor temperature; the value
+        # measured now would wrongly anchor the curve there. Without a forecast the
+        # current reading is the best guess.
+        future_outdoor = None if any(p.outdoor_c is not None for p in forecast) else outdoor
         for _ in range(LEAD_MAX_ITERATIONS):
             wait = total - lead
             if wait <= 0:
@@ -516,7 +528,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             if start_c is None:
                 break
             nxt = self.model.preheat(
-                now + timedelta(minutes=wait), start_c, goal, outdoor, forecast
+                now + timedelta(minutes=wait), start_c, goal, future_outdoor, forecast, max_c
             ).minutes
             if nxt is None:
                 break

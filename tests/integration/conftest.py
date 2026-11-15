@@ -174,9 +174,17 @@ class FakeModel(ThermalModel):
         target_c: float,
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
+        max_c: float | None = None,
     ) -> PreheatEstimate:
         self.preheat_calls.append(
-            {"start": start_c, "target": target_c, "outdoor": outdoor_c, "forecast": forecast}
+            {
+                "now": now,
+                "start": start_c,
+                "target": target_c,
+                "outdoor": outdoor_c,
+                "forecast": forecast,
+                "max_c": max_c,
+            }
         )
         assert self.params is not None
         minutes = max(0.0, (target_c - start_c) / self.params.heating_rate_k_per_h * 60)

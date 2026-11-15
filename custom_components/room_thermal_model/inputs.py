@@ -34,7 +34,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from homeassistant.components.climate import ATTR_CURRENT_TEMPERATURE, ATTR_HVAC_ACTION
+from homeassistant.components.climate import (
+    ATTR_CURRENT_TEMPERATURE,
+    ATTR_HVAC_ACTION,
+    ATTR_MAX_TEMP,
+)
 from homeassistant.const import (
     ATTR_TEMPERATURE,
     ATTR_UNIT_OF_MEASUREMENT,
@@ -161,6 +165,14 @@ def climate_target(state: State | None, system_unit: str) -> float | None:
         return None
     assert state is not None
     return to_celsius(state.attributes.get(ATTR_TEMPERATURE), system_unit)
+
+
+def climate_max_temp(state: State | None, system_unit: str) -> float | None:
+    """Maximum setpoint (``max_temp``) of a climate in °C."""
+    if not _valid(state):
+        return None
+    assert state is not None
+    return to_celsius(state.attributes.get(ATTR_MAX_TEMP), system_unit)
 
 
 def weather_temperature(state: State | None, system_unit: str) -> float | None:
