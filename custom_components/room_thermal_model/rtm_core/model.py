@@ -20,7 +20,7 @@ from .base import (
 )
 from .cooling import cooling_tau
 from .deadtime import tangent_dead_time
-from .episodes import episode_heating_rate, regulation_mask
+from .episodes import episode_heating_rate, learning_effort, regulation_mask
 from .fit import Dataset, FitResult, build_dataset, fit_rc
 from .forecast import mean_over, outdoor_curve, solve_duration
 from .grid import Grid, ceil_ts, dt_of, floor_ts, resample, ts_of
@@ -183,7 +183,8 @@ class RCThermalModel(ThermalModel):
         if len(ds) * ds.dt_h < MIN_FIT_HOURS:
             self._summary = {"status": "insufficient_data", "rows": len(ds)}
             return dict(self._summary)
-        res = fit_rc(ds, grid.effort, cfg)
+        effort = learning_effort(grid, regulation)
+        res = fit_rc(ds, effort, cfg)
         if res is None:
             self._summary = {"status": "insufficient_data", "rows": len(ds)}
             return dict(self._summary)
@@ -210,7 +211,7 @@ class RCThermalModel(ThermalModel):
             fixed[1] = 1.0 / cool.tau_hours
             fallbacks.append("loss_rate_from_cooling")
         if fallbacks:
-            res = self._refit(ds, grid, res, d_steps, fixed)
+            res = self._refit(ds, effort, res, d_steps, fixed)
 
         # full-effort heating rate measured on real heat-up episodes
         episode = episode_heating_rate(grid, res.b, res.c, res.d_steps, ds.use_outdoor)
@@ -220,7 +221,7 @@ class RCThermalModel(ThermalModel):
                 fixed[0] = episode.a_k_per_h
                 fixed[1] = res.b
                 fallbacks.append("heating_rate_from_episodes")
-                res = self._refit(ds, grid, res, res.d_steps, fixed)
+                res = self._refit(ds, effort, res, res.d_steps, fixed)
 
         reliable, unreliable_reason = self._plausible(res, ds.use_outdoor, fixed)
 
@@ -231,7 +232,7 @@ class RCThermalModel(ThermalModel):
             k_hold = ds.k[int((1.0 - HOLDOUT_FRACTION) * n)]
             train = ds.subset(k_hold)
             r_tr = fit_rc(
-                train, grid.effort, cfg, d_candidates=[res.d_steps], fixed=fixed, scale=res.scale
+                train, effort, cfg, d_candidates=[res.d_steps], fixed=fixed, scale=res.scale
             )
             if r_tr is not None:
                 p_tr = Params(r_tr.a, r_tr.b, r_tr.c, r_tr.d_steps, ds.use_outdoor)
@@ -294,12 +295,15 @@ class RCThermalModel(ThermalModel):
         return dict(self._summary)
 
     def _refit(
-        self, ds: Dataset, grid: Grid, res: FitResult, d_steps: int, fixed: dict[int, float]
+        self,
+        ds: Dataset,
+        effort: list[float | None],
+        res: FitResult,
+        d_steps: int,
+        fixed: dict[int, float],
     ) -> FitResult:
         """Refit with some parameters fixed, keeping the dead-time diagnostics."""
-        res2 = fit_rc(
-            ds, grid.effort, self.config, d_candidates=[d_steps], fixed=fixed, scale=res.scale
-        )
+        res2 = fit_rc(ds, effort, self.config, d_candidates=[d_steps], fixed=fixed, scale=res.scale)
         if res2 is None:
             return res
         res2.criterion, res2.flatness = res.criterion, res.flatness

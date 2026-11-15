@@ -319,6 +319,45 @@ async def test_preheat_now_latch_holds_and_releases(
     assert hass.states.get(NOW_SENSOR).state == "off"
 
 
+async def test_preheat_now_latch_holds_until_arrival_when_at_target_early(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
+    """Target reached long before the arrival: on until the arrival, no off/on flap."""
+    set_inputs(hass)
+    arrival = dt_util.utcnow() + timedelta(minutes=60)
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    entry = await setup_entry(hass, make_entry(hass, arrival=True))
+    coordinator = await _fitted(hass, entry)
+    # Cooling 1 K/h until the start: lead = 50 - lead / 3 = 37.5 min.
+    start = dt_util.parse_datetime(hass.states.get(START).state)
+    assert abs(start - (arrival - timedelta(minutes=37.5))) < timedelta(seconds=10)
+    freezer.move_to(start + timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(NOW_SENSOR).state == "on"
+
+    # At target 37 min before the arrival: the lead drops to ~2 min, the latch holds.
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=21.0))
+    await coordinator.async_refresh()
+    assert coordinator.data.preheat_start > dt_util.utcnow() + timedelta(minutes=30)
+    assert coordinator.data.latched
+    assert hass.states.get(NOW_SENSOR).state == "on"
+
+    # A small postponement (within the hold margin) keeps it on as well.
+    arrival += timedelta(minutes=10)
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    for minutes in (10, 20, 30, 40):
+        freezer.move_to(start + timedelta(minutes=minutes))
+        await coordinator.async_refresh()
+        assert hass.states.get(NOW_SENSOR).state == "on", minutes
+
+    freezer.move_to(arrival + timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(NOW_SENSOR).state == "off"
+
+
 async def test_status_unreliable(hass: HomeAssistant, fake_model: None) -> None:
     """Implausible parameters give no preheat value and no preheat start."""
     set_inputs(hass)

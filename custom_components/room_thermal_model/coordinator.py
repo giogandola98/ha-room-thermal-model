@@ -132,7 +132,8 @@ class ZoneData:
 
         Once on it is held (``latched``) until the arrival, so it neither drops when the
         room reaches the target early nor flickers while heating; the update releases the
-        latch when the arrival moves well past the expected end of the preheat.
+        latch only when the arrival passes, is cleared or moves later by more than
+        ``PREHEAT_HOLD_MINUTES``.
         """
         if self.arrival is None or self.arrival <= now:
             return False
@@ -441,11 +442,15 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         else:
             status = STATUS_OK
         preheat_start = arrival - timedelta(minutes=lead) if arrival and lead is not None else None
+        # Held until the arrival whatever the lead does (it collapses once the room is at
+        # target); released only when the arrival passes, is cleared or is postponed.
+        prev = self.data
         latched = (
-            self.data is not None
-            and self.data.preheat_now(now) is True
+            prev is not None
+            and prev.preheat_now(now) is True
+            and prev.arrival is not None
             and arrival is not None
-            and (arrival - now).total_seconds() / 60.0 <= (lead or 0.0) + PREHEAT_HOLD_MINUTES
+            and arrival <= prev.arrival + timedelta(minutes=PREHEAT_HOLD_MINUTES)
         )
         forecast_used = estimate is not None and estimate.reason.get("outdoor_source") == "forecast"
         data = ZoneData(

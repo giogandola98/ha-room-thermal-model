@@ -74,7 +74,7 @@ FALLBACK_EFFORT_MARGIN_K: Final = 0.2  # no hvac_action: heating when target > c
 LEAD_MAX_ITERATIONS: Final = 10  # fixed-point iterations of the preheat lead time
 LEAD_TOLERANCE_MINUTES: Final = 0.5  # lead time convergence threshold
 UNREACHABLE_MARGIN_K: Final = 0.5  # unreachable target: aim this far below the maximum
-PREHEAT_HOLD_MINUTES: Final = 30  # preheat_now stays on this long past the expected end
+PREHEAT_HOLD_MINUTES: Final = 30  # preheat_now stays latched unless arrival moves this late
 
 # hvac_action values (standard HVACAction strings)
 HEATING_ACTIONS: Final = frozenset({"heating", "preheating"})
