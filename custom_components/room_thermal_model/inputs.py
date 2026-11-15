@@ -21,6 +21,10 @@ Rules:
   current + 0.2 K → 1, else 0;
 * outdoor temperature: the outdoor sensor when valid, else the weather entity's
   ``temperature`` attribute, else unknown;
+* setpoint: the climate ``temperature`` (target) attribute, carried into
+  ``Sample.setpoint_c`` (None when the climate reports no target). It is not used as a
+  learning input; the model reads it to tell when a thermostatic valve is throttling (the
+  room sits just below its current setpoint) rather than heating at full power;
 * a sample is ``excluded`` from learning while the climate is unavailable/unknown or
   actively cooling (the model only describes heating).
 
@@ -297,4 +301,5 @@ def build_sample(
         outdoor_c=outdoor_temperature(inputs, states, system_unit),
         effort=heating_effort(inputs, states, system_unit),
         excluded=not _valid(climate) or climate_cooling(climate),
+        setpoint_c=climate_target(climate, system_unit),
     )

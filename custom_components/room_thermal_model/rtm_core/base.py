@@ -34,7 +34,10 @@ class Sample:
 
     ``effort`` is the heating effort in [0, 1] (None = unknown). ``outdoor_c`` may be None
     when no outdoor source is configured or the value is missing. ``excluded`` marks
-    periods that must not be used for learning (e.g. climate unavailable).
+    periods that must not be used for learning (e.g. climate unavailable). ``setpoint_c``
+    is the climate target temperature at this instant (None when the climate has no
+    ``temperature`` attribute); it lets the model detect a thermostatic valve throttling
+    as "the room is close below its current setpoint" instead of "close to a run's top".
     """
 
     ts: datetime
@@ -42,6 +45,7 @@ class Sample:
     outdoor_c: float | None
     effort: float | None
     excluded: bool = False
+    setpoint_c: float | None = None
 
 
 @dataclass(frozen=True)

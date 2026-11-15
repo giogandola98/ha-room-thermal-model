@@ -32,7 +32,11 @@ it to the outside (a lumped *RC* model), on a 5-minute grid:
 - **Thermostatic valves**: a thermostat (or Versatile Thermostat over TRVs) keeps
   reporting `heating` for hours while the valve only trickles to hold the setpoint, or
   while the boiler is idle. Inside every heating period, the part after the room reached
-  its highest temperature is therefore not learnt from. The full heating power is also
+  its highest temperature is therefore not learnt from, and neither is reported heating
+  while the room sits within 0.6 K below the climate's current setpoint (the valve is
+  throttling). Because the setpoint is followed over time, an overnight eco regulation
+  followed by the morning climb to comfort is handled correctly; history recorded without
+  a setpoint falls back to a band below the heating period's top. The full heating power is also
   measured directly on real heat-ups (the room was idle, then warmed up); when the
   regression disagrees by more than 30 %, that measured rate is used. When the data
   cannot identify the heat loss, the time constant comes from free-cooling periods.

@@ -106,3 +106,68 @@ def test_old_live_samples_are_ignored():
     n = len(m._grid)
     m.add_sample(Sample(at(-600), 30.0, 5.0, 1.0))
     assert len(m._grid) == n
+
+
+def test_setpoint_locf_and_round_trip():
+    samples = [
+        Sample(at(1), 20.0, 5.0, 1.0, setpoint_c=17.0),
+        Sample(at(7), 20.5, None, 1.0, setpoint_c=21.0),
+        Sample(at(21), 21.0, None, 1.0, setpoint_c=21.0),
+    ]
+    g = resample(samples, 5, 15, 180)
+    # setpoint carried forward like the outdoor value (step change, long hold)
+    assert g.setpoint == [17.0, 21.0, 21.0]
+    data = json.loads(json.dumps(g.to_dict()))
+    assert data["setpoint_c100"] == [1700, 2100, 2100]
+    g2 = Grid.from_dict(data)
+    assert g2.setpoint == g.setpoint
+    assert len(g2.setpoint) == len(g2)
+
+
+def test_setpoint_none_round_trips():
+    samples = [Sample(at(m), 20.0, 5.0, 0.0) for m in range(0, 20, 5)]
+    g = resample(samples, 5, 15)
+    assert all(v is None for v in g.setpoint) and len(g.setpoint) == len(g)
+    g2 = Grid.from_dict(json.loads(json.dumps(g.to_dict())))
+    assert g2.setpoint == [None] * len(g2)
+
+
+def test_old_dict_without_setpoint_loads_as_none():
+    samples = [Sample(at(m), 20.0, 5.0, 0.0, setpoint_c=19.0) for m in range(0, 20, 5)]
+    g = resample(samples, 5, 15)
+    data = g.to_dict()
+    del data["setpoint_c100"]  # pre-feature snapshot
+    g2 = Grid.from_dict(data)
+    assert g2.setpoint == [None] * len(g2)
+    assert len(g2) == len(g) and g2.indoor == g.indoor
+
+
+def test_merge_and_append_preserve_setpoint_and_alignment():
+    a = resample([Sample(at(m), 20.0, 5.0, 1.0, setpoint_c=17.0) for m in range(0, 26, 5)], 5, 15)
+    b = resample([Sample(at(m), 21.0, 5.0, 1.0, setpoint_c=21.0) for m in range(30, 56, 5)], 5, 15)
+    merged = a.merged(b)
+    cols = (merged.indoor, merged.outdoor, merged.effort, merged.excluded, merged.setpoint)
+    assert len({len(c) for c in cols}) == 1  # all columns aligned
+    assert merged.setpoint[0] == 17.0 and merged.setpoint[-1] == 21.0
+
+    appended = a.copy()
+    appended.append_rows(b)
+    cols2 = (
+        appended.indoor,
+        appended.outdoor,
+        appended.effort,
+        appended.excluded,
+        appended.setpoint,
+    )
+    assert len({len(c) for c in cols2}) == 1
+    assert appended.setpoint[0] == 17.0 and appended.setpoint[-1] == 21.0
+    # the padded gap between the two grids carries no setpoint
+    assert None in appended.setpoint
+
+
+def test_trim_before_keeps_setpoint_aligned():
+    g = resample([Sample(at(m), 20.0, 5.0, 1.0, setpoint_c=18.0) for m in range(0, 61, 5)], 5, 15)
+    g.trim_before(ts_of(at(30)))
+    cols = (g.indoor, g.outdoor, g.effort, g.excluded, g.setpoint)
+    assert len({len(c) for c in cols}) == 1
+    assert all(v == 18.0 for v in g.setpoint)

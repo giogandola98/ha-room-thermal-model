@@ -163,6 +163,7 @@ class SyntheticRun:
     true_temp: list[float]  # per minute (state at the start of the minute)
     outdoor: list[float]  # per minute (true)
     effort: list[float]  # per minute (real heating; samples carry the reported effort)
+    setpoint: list[float]  # per minute (climate target used by the regulation)
     outdoor_profile: OutdoorProfile
     windows: list[tuple[datetime, float]] = field(default_factory=list)  # (start, drop K)
 
@@ -240,6 +241,7 @@ def generate(
     u_hist: list[float] = []
     true_temp: list[float] = []
     out_list: list[float] = []
+    sp_list: list[float] = []
     samples: list[Sample] = []
     win_left = 0
     win_rate = 0.0
@@ -264,6 +266,7 @@ def generate(
         u_hist.append(u)
         true_temp.append(temp)
         out_list.append(tout)
+        sp_list.append(sp)
         if m % sample_minutes == 0 and not gap[m]:
             meas = round((temp + rng.gauss(0.0, spec.noise_sigma)) / q) * q
             if m in glitch:
@@ -276,6 +279,7 @@ def generate(
                     o,
                     None if excluded[m] else reported,
                     excluded[m],
+                    setpoint_c=sp,
                 )
             )
         # advance one minute
@@ -288,7 +292,9 @@ def generate(
         if win_left > 0:
             temp -= win_rate
             win_left -= 1
-    return SyntheticRun(spec, start, samples, true_temp, out_list, u_hist, outdoor, win_list)
+    return SyntheticRun(
+        spec, start, samples, true_temp, out_list, u_hist, sp_list, outdoor, win_list
+    )
 
 
 def true_preheat_minutes(
@@ -353,10 +359,41 @@ def trv_room(**kw: object) -> RoomSpec:
     return RoomSpec(**base)  # type: ignore[arg-type]
 
 
+def trv_eco_comfort_room(**kw: object) -> RoomSpec:
+    """Thermostatic valve on a simple night-eco / day-comfort schedule.
+
+    The valve regulates around the eco setpoint (~17 °C) all night, then the morning
+    comfort target (~21 °C) drives one long continuous reported-heating run from the eco
+    plateau up to comfort. There is no boiler-off reset: the only free-power climb each day
+    is that morning rise, and the only free cooling is the evening drop from comfort back
+    to eco. A band around the run top (21 °C) cannot tell that the eco plateau was already
+    throttled, so without the per-sample setpoint the full heating rate is learnt too low.
+    """
+    base: dict[str, object] = {
+        "name": "trv_eco_comfort",
+        "a": 3.0,
+        "b": 0.08,
+        "c": 0.2,
+        "dead_time_minutes": 25.0,
+        "trv_band_k": 0.6,
+        "hysteresis_k": 0.1,
+        "eco_c": 17.0,
+        "comfort_c": 21.0,
+        "weekday_comfort": ((7.0, 22.0),),
+        "weekend_comfort": ((7.0, 22.0),),
+        "heat_source_off_days": (),
+        "outdoor_mean": 0.0,
+        "seed": 19,
+    }
+    base.update(kw)
+    return RoomSpec(**base)  # type: ignore[arg-type]
+
+
 ROOMS: dict[str, Callable[..., RoomSpec]] = {
     "radiator": radiator_room,
     "fast_radiator": fast_radiator_room,
     "underfloor": underfloor_room,
     "no_outdoor": no_outdoor_room,
     "trv": trv_room,
+    "trv_eco_comfort": trv_eco_comfort_room,
 }

@@ -34,7 +34,11 @@ from .quality import (
     maturity,
 )
 
-STATE_VERSION = 1
+# v2 adds the per-sample setpoint column (grid + pending rows). v1 snapshots still load:
+# their setpoint is taken as None, so the learnt state is kept and the valve-throttling
+# detection simply falls back to the run-top band until new data carries a setpoint.
+STATE_VERSION = 2
+SUPPORTED_STATE_VERSIONS = frozenset({1, 2})
 MIN_FIT_HOURS = 3.0  # usable data needed before the first fit
 MIN_QUALITY_HOURS = 12.0  # usable data needed for a holdout evaluation
 REFIT_SECONDS = 3600.0
@@ -463,7 +467,8 @@ class RCThermalModel(ThermalModel):
             "config": asdict(self.config),
             "grid": self._grid.to_dict(),
             "pending": [
-                [t, s.indoor_c, s.outdoor_c, s.effort, int(s.excluded)] for t, s in self._pending
+                [t, s.indoor_c, s.outdoor_c, s.effort, int(s.excluded), s.setpoint_c]
+                for t, s in self._pending
             ],
             "last_sample_ts": self._last_sample_ts,
             "params": dict(self._params) if self._params else None,
@@ -476,7 +481,7 @@ class RCThermalModel(ThermalModel):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], config: ModelConfig) -> RCThermalModel:
-        if not isinstance(data, dict) or data.get("version") != STATE_VERSION:
+        if not isinstance(data, dict) or data.get("version") not in SUPPORTED_STATE_VERSIONS:
             raise ValueError("unsupported model state")
         model = cls(config)
         params = data.get("params")
@@ -502,7 +507,9 @@ class RCThermalModel(ThermalModel):
             except (KeyError, ValueError, TypeError):
                 model._grid = Grid(config.step_minutes)
             for row in data.get("pending", []):
-                t, ind, out, eff, exc = row
-                model._pending.append((t, Sample(dt_of(t), ind, out, eff, bool(exc))))
+                # v1 rows have no setpoint (5 fields); v2 rows carry it as the 6th.
+                t, ind, out, eff, exc = row[:5]
+                sp = row[5] if len(row) > 5 else None
+                model._pending.append((t, Sample(dt_of(t), ind, out, eff, bool(exc), sp)))
         model._trim()
         return model

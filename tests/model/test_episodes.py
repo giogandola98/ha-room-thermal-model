@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
+
+import pytest
+
 from rtm_core import ModelConfig, RCThermalModel
 from rtm_core import synthetic as syn
 from rtm_core.episodes import (
     APPROACH_BAND_K,
+    SETPOINT_BAND_K,
     episode_heating_rate,
     learning_effort,
     regulation_mask,
@@ -159,3 +164,133 @@ def test_episode_refit_keeps_unidentified_loss_rate_unreliable(monkeypatch):
     assert summary["unreliable_reason"] == "loss_rate_unidentified"
     est = model.preheat(run.samples[-1].ts, 18.0, 20.0, 5.0)
     assert est.minutes is None and est.reason["status"] == "unreliable"
+
+
+def _grid_sp(indoor, effort, setpoint):
+    """Grid with an explicit per-row setpoint column."""
+    n = len(indoor)
+    return Grid(5.0, 0.0, list(indoor), [10.0] * n, list(effort), [False] * n, list(setpoint))
+
+
+def test_learning_effort_uses_setpoint_band_not_run_top():
+    # One long reported-heating run: eco regulation around 17 (throttled against sp=17),
+    # then the morning target jumps to 21 and the room climbs. A band around the run top
+    # (21) would keep the throttled eco rows; the setpoint band drops exactly them.
+    indoor = [16.9, 16.9, 16.9, 17.3, 18.3, 19.3, 20.3, 20.7, 20.9]
+    effort = [1.0] * 9
+    setpoint = [17.0, 17.0, 17.0, 21.0, 21.0, 21.0, 21.0, 21.0, 21.0]
+    assert SETPOINT_BAND_K == 0.6
+    eff = learning_effort(_grid_sp(indoor, effort, setpoint))
+    # eco rows (>= 17 - 0.6 = 16.4 while sp=17) are throttling -> None;
+    # the climb 17.3..20.3 is full power -> kept; 20.7, 20.9 (>= 21 - 0.6 = 20.4) throttling.
+    assert eff == [None, None, None, 1.0, 1.0, 1.0, 1.0, None, None]
+
+
+def test_learning_effort_without_setpoint_falls_back_to_run_top():
+    # Same shape but no setpoint column: must behave exactly like before (run-top band).
+    indoor = [16.9, 16.9, 16.9, 17.3, 18.3, 19.3, 20.3, 20.7, 20.9]
+    effort = [1.0] * 9
+    # top 20.9, APPROACH_BAND_K 0.7 -> cut 20.2: only the last three rows dropped.
+    eff = learning_effort(_grid(indoor, effort))
+    assert eff == [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, None, None, None]
+
+
+def _strip(samples):
+    return [dataclasses.replace(s, setpoint_c=None) for s in samples]
+
+
+def _eco_comfort_fit(seed, *, use_setpoint, days=21.0):
+    spec = syn.trv_eco_comfort_room(seed=seed)
+    run = syn.generate(spec, days, windows=False)
+    model = RCThermalModel(ModelConfig())
+    model.load_history(run.samples if use_setpoint else _strip(run.samples), replace=True)
+    summary = model.fit(run.samples[-1].ts)
+    now = run.samples[-1].ts
+    truth = syn.true_preheat_minutes(spec, 17.0, 21.0, 2.0)
+    est = model.preheat(now, 17.0, 21.0, 2.0)
+    return spec, model, summary, truth, est
+
+
+def test_eco_comfort_continuous_rise_needs_setpoint():
+    """Overnight eco -> morning comfort as one long rise: the setpoint fixes the bias.
+
+    Without the per-sample setpoint the throttled eco plateau is learnt as full power, so
+    the heating rate comes out low and the preheat long (> 8 %). With the setpoint the eco
+    rows are dropped and both land within a few percent of the truth.
+    """
+    spec, model, summary, truth, est = _eco_comfort_fit(1, use_setpoint=True)
+    assert summary["reliable"] is True
+    p = model.parameters()
+    assert abs(p.heating_rate_k_per_h - spec.a) / spec.a < 0.05  # within 5 %
+    assert truth is not None and est.minutes is not None
+    assert abs(est.minutes - truth) / truth < 0.08  # within 8 %
+
+    # The same data without the setpoint (pre-change behaviour) is clearly worse: this is
+    # the bug the setpoint signal removes, so the fix is load-bearing.
+    _, fb_model, _, fb_truth, fb_est = _eco_comfort_fit(1, use_setpoint=False)
+    fb_p = fb_model.parameters()
+    fallback_a_err = abs(fb_p.heating_rate_k_per_h - spec.a) / spec.a
+    fallback_ph_err = abs(fb_est.minutes - fb_truth) / fb_truth
+    assert fallback_ph_err > 0.08 or fallback_a_err > 0.05
+
+
+@pytest.mark.parametrize("seed", [1, 3, 5])
+def test_eco_comfort_multi_seed_robust(seed):
+    """The seed-to-seed divergence seen before (e.g. ~200 vs 168 min) is gone.
+
+    If a seed could not be made reliable (room never cools freely, ``b`` unidentifiable)
+    the model must report it UNRELIABLE rather than return a wrong number.
+    """
+    spec, model, summary, truth, est = _eco_comfort_fit(seed, use_setpoint=True)
+    if not summary["reliable"]:
+        assert est.minutes is None  # no wrong number on an unreliable fit
+        return
+    p = model.parameters()
+    assert abs(p.heating_rate_k_per_h - spec.a) / spec.a < 0.06  # within 6 %
+    assert truth is not None and est.minutes is not None
+    assert abs(est.minutes - truth) / truth < 0.08  # within 8 %
+
+
+def test_eco_comfort_fallback_without_setpoint_is_unchanged():
+    """With the setpoint absent everywhere the result is the old run-top-band behaviour.
+
+    Stripping the setpoint on the samples must give exactly the same learnt state as a grid
+    that simply has no setpoint column at all (old history / old snapshot): same fallback
+    path, same numbers.
+    """
+    spec = syn.trv_eco_comfort_room(seed=3)
+    run = syn.generate(spec, 21.0, windows=False)
+    stripped = _strip(run.samples)
+
+    model_a = RCThermalModel(ModelConfig())
+    model_a.load_history(stripped, replace=True)
+    sa = model_a.fit(run.samples[-1].ts)
+
+    # A model whose grid never carried a setpoint column (loaded from an old-style dict)
+    # must learn identically.
+    data = model_a.to_dict()
+    grid = data["grid"]
+    grid.pop("setpoint_c100")  # simulate a pre-feature snapshot
+    data["pending"] = [row[:5] for row in data["pending"]]
+    data["version"] = 1
+    model_b = RCThermalModel.from_dict(data, ModelConfig())
+    sb = model_b.fit(run.samples[-1].ts)
+
+    assert sa["reliable"] == sb["reliable"]
+    pa, pb = model_a.parameters(), model_b.parameters()
+    assert pa.heating_rate_k_per_h == pytest.approx(pb.heating_rate_k_per_h)
+    assert pa.loss_rate_per_h == pytest.approx(pb.loss_rate_per_h)
+    assert pa.dead_time_minutes == pytest.approx(pb.dead_time_minutes)
+
+
+def test_trv_room_fallback_without_setpoint_meets_original_bounds():
+    """The boiler-off TRV room still works through the pure fallback path (no setpoint)."""
+    spec = syn.trv_room()
+    run = syn.generate(spec, 21.0, windows=False)
+    model = RCThermalModel(ModelConfig())
+    model.load_history(_strip(run.samples), replace=True)
+    summary = model.fit(run.samples[-1].ts)
+    assert summary["reliable"] is True
+    p = model.parameters()
+    assert abs(p.heating_rate_k_per_h - spec.a) / spec.a < 0.30
+    assert abs(p.loss_rate_per_h - spec.b) / spec.b < 0.35
