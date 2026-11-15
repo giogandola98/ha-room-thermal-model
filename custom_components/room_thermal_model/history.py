@@ -6,7 +6,9 @@ so raw state rows never pile up:
 
 * state rows of every input are merged chronologically and replayed; after each
   change a sample is built from the latest state of every input (same rules as the
-  live sampling, see ``inputs.py``);
+  live sampling, see ``inputs.py``), including the climate ``temperature`` (target)
+  attribute reconstructed as ``Sample.setpoint_c`` — it changes in steps and is carried
+  forward with the same anti-downtime limit as the other signals;
 * changes closer than ``HISTORY_MIN_SPACING_S`` are coalesced (last one wins);
 * between changes the last known states are carried forward on a
   ``SAMPLE_INTERVAL_MINUTES`` grid (recorder rows only store changes; the state holds
@@ -63,6 +65,7 @@ class HistoryReducer:
                 outdoor_c=sample.outdoor_c,
                 effort=sample.effort,
                 excluded=sample.excluded,
+                setpoint_c=sample.setpoint_c,
             )
             return
         self.samples.append(sample)

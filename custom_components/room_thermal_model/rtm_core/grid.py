@@ -2,9 +2,11 @@
 
 Row ``k`` of a :class:`Grid` describes the interval ``[t_k, t_k + step)``:
 
-- ``indoor[k]`` / ``outdoor[k]``: last observation at or before ``t_k``
+- ``indoor[k]`` / ``outdoor[k]`` / ``setpoint[k]``: last observation at or before ``t_k``
   (last-observation-carried-forward), or ``None`` when that observation is older than
   ``max_gap`` (``outdoor_max_gap`` for outdoor). Large gaps therefore break the series.
+  The setpoint (climate target) changes in steps and is carried forward like the outdoor
+  value; ``None`` when the climate reports no target.
 - ``effort[k]``: time-weighted mean of the (piecewise constant) effort over the interval.
   Each effort observation is held until the next one, at most ``max_gap``; ``None`` when
   less than half of the interval is covered.
@@ -52,6 +54,7 @@ class Grid:
     outdoor: list[float | None] = field(default_factory=list)
     effort: list[float | None] = field(default_factory=list)
     excluded: list[bool] = field(default_factory=list)
+    setpoint: list[float | None] = field(default_factory=list)
 
     @property
     def step_s(self) -> float:
@@ -86,6 +89,7 @@ class Grid:
             self.outdoor = list(other.outdoor)
             self.effort = list(other.effort)
             self.excluded = list(other.excluded)
+            self.setpoint = list(other.setpoint)
             return
         end = self.end_ts
         assert end is not None
@@ -97,12 +101,14 @@ class Grid:
         self.outdoor.extend(other.outdoor)
         self.effort.extend(other.effort)
         self.excluded.extend(other.excluded)
+        self.setpoint.extend(other.setpoint)
 
     def _pad(self, n: int) -> None:
         self.indoor.extend([None] * n)
         self.outdoor.extend([None] * n)
         self.effort.extend([None] * n)
         self.excluded.extend([False] * n)
+        self.setpoint.extend([None] * n)
 
     def trim_before(self, cutoff_ts: float) -> None:
         """Drop rows starting before ``cutoff_ts``."""
@@ -112,7 +118,13 @@ class Grid:
         if n <= 0:
             return
         n = min(n, len(self))
-        del self.indoor[:n], self.outdoor[:n], self.effort[:n], self.excluded[:n]
+        del (
+            self.indoor[:n],
+            self.outdoor[:n],
+            self.effort[:n],
+            self.excluded[:n],
+            self.setpoint[:n],
+        )
         self.start_ts += n * self.step_s
 
     def merged(self, other: Grid) -> Grid:
@@ -137,6 +149,7 @@ class Grid:
                 out.outdoor[j] = src.outdoor[i]
                 out.effort[j] = src.effort[i]
                 out.excluded[j] = src.excluded[i]
+                out.setpoint[j] = src.setpoint[i] if i < len(src.setpoint) else None
         return out
 
     def copy(self) -> Grid:
@@ -147,12 +160,19 @@ class Grid:
             list(self.outdoor),
             list(self.effort),
             list(self.excluded),
+            list(self.setpoint),
         )
 
     def snapshot(self) -> Grid:
         """Consistent copy, safe against rows appended/trimmed concurrently."""
         start = self.start_ts
-        cols = (list(self.indoor), list(self.outdoor), list(self.effort), list(self.excluded))
+        cols = (
+            list(self.indoor),
+            list(self.outdoor),
+            list(self.effort),
+            list(self.excluded),
+            list(self.setpoint),
+        )
         n = min(len(c) for c in cols)
         if start is not None and self.start_ts != start:  # trimmed while copying: retry
             return self.snapshot()
@@ -168,6 +188,7 @@ class Grid:
             "outdoor_c100": [None if v is None else round(v * 100) for v in self.outdoor],
             "effort_e3": [None if v is None else round(v * 1000) for v in self.effort],
             "excluded_rows": [i for i, ex in enumerate(self.excluded) if ex],
+            "setpoint_c100": [None if v is None else round(v * 100) for v in self.setpoint],
         }
 
     @classmethod
@@ -182,8 +203,16 @@ class Grid:
         for i in data.get("excluded_rows", []):
             if 0 <= i < n:
                 excluded[i] = True
+        # Old snapshots have no setpoint column: default to all-None (fallback path).
+        raw_sp = data.get("setpoint_c100")
+        if raw_sp is None:
+            setpoint: list[float | None] = [None] * n
+        else:
+            if len(raw_sp) != n:
+                raise ValueError("inconsistent grid columns")
+            setpoint = [None if v is None else v / 100.0 for v in raw_sp]
         start = data.get("start_ts")
-        return cls(float(data["step_minutes"]), start, indoor, outdoor, effort, excluded)
+        return cls(float(data["step_minutes"]), start, indoor, outdoor, effort, excluded, setpoint)
 
 
 def resample(
@@ -224,10 +253,15 @@ def resample(
         (t, s.outdoor_c) for t, s in zip(times, rows, strict=True) if s.outdoor_c is not None
     ]
     effort_ev = [(t, s.effort) for t, s in zip(times, rows, strict=True) if s.effort is not None]
+    setpoint_ev = [
+        (t, s.setpoint_c) for t, s in zip(times, rows, strict=True) if s.setpoint_c is not None
+    ]
 
     grid.indoor = _locf(indoor_ev, start_ts, step_s, n, max_gap_s)
     grid.outdoor = _locf(outdoor_ev, start_ts, step_s, n, out_gap_s)
     grid.effort = _step_mean(effort_ev, start_ts, step_s, n, max_gap_s)
+    # Setpoint changes in steps: carry it forward like the outdoor value.
+    grid.setpoint = _locf(setpoint_ev, start_ts, step_s, n, out_gap_s)
 
     excluded = [False] * n
     for i, s in enumerate(rows):

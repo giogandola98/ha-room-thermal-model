@@ -129,6 +129,38 @@ def test_cooling_is_excluded() -> None:
     assert sample.effort == 0.0
 
 
+def test_build_sample_reads_climate_setpoint() -> None:
+    """The climate target ``temperature`` is threaded into ``Sample.setpoint_c``."""
+    sample = build_sample(MIN, {CLIMATE: _climate(current=18.0, target=21.5)}, T0, C)
+    assert sample.setpoint_c == pytest.approx(21.5)
+    # °F target converted to °C
+    hot = build_sample(MIN, {CLIMATE: _climate(current=64.0, target=70.0)}, T0, "°F")
+    assert hot.setpoint_c == pytest.approx(21.11, abs=0.01)
+
+
+def test_build_sample_setpoint_none_without_target() -> None:
+    """A climate with no target temperature yields ``setpoint_c=None`` (fallback path)."""
+    state = State(CLIMATE, "heat", {"current_temperature": 19.0, "hvac_action": "heating"})
+    sample = build_sample(MIN, {CLIMATE: state}, T0, C)
+    assert sample.setpoint_c is None
+    assert sample.effort == 1.0  # the rest of the sample is unaffected
+
+
+def test_history_reconstructs_setpoint_with_step_carry() -> None:
+    """The setpoint is rebuilt from the climate history and carried forward in steps."""
+    rows = {
+        CLIMATE: [
+            _climate_at(T0, current=17.0, target=17.0, action="heating"),
+            _climate_at(T0 + timedelta(minutes=20), current=18.0, target=21.0, action="heating"),
+        ]
+    }
+    samples = reduce_states(MIN, C, [rows], T0 + timedelta(minutes=30))
+    before = [s for s in samples if s.ts < T0 + timedelta(minutes=20)]
+    after = [s for s in samples if s.ts >= T0 + timedelta(minutes=20)]
+    assert before and all(s.setpoint_c == 17.0 for s in before)
+    assert after and all(s.setpoint_c == 21.0 for s in after)
+
+
 def test_room_sensor_overrides_climate() -> None:
     """Room sensor wins (no mixing when it is unavailable); °F converted."""
     states = {CLIMATE: _climate(current=19.0), ROOM: _temp(ROOM, "68", "°F")}

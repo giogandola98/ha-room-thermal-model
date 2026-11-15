@@ -9,9 +9,14 @@ looks like "heating with no effect".
 - :func:`regulation_mask`: inside every heating run, the rows after the run reached its
   highest temperature are regulation (or ineffective heating) and are not learnt from.
 - :func:`learning_effort`: a thermostatic valve throttles inside its proportional band
-  while the thermostat still reports "heating" (effort 1), so with on/off effort the
-  heating rows within ``APPROACH_BAND_K`` of the run's top have an unknown effort and
-  would teach a heating rate well below the full power. A real effort sensor (valve
+  while the thermostat still reports "heating" (effort 1), so with on/off effort those
+  rows have an unknown effort and would teach a heating rate well below the full power.
+  When the per-sample setpoint is known, a heating row is throttling when the room is
+  within ``SETPOINT_BAND_K`` *below its current setpoint* -- this is what catches the
+  overnight-eco -> morning-comfort case, where the eco regulation around ~17 °C and the
+  climb to ~21 °C are one long reported-heating run and a band around the run top (21 °C)
+  would miss the throttled eco part. Without a setpoint the detection falls back to
+  ``APPROACH_BAND_K`` of the run's top (old history). A real effort sensor (valve
   opening, fractional values) measures the throttling and is kept as is.
 - :func:`episode_heating_rate`: the full-effort heating rate measured directly on the
   heat-up part of real episodes (the room was idle before, the temperature rose), with
@@ -32,6 +37,10 @@ MIN_EPISODE_MINUTES = 30.0
 # thermostatic valve proportional band (typically 0.5-1 K): reported on/off heating within
 # this distance of the run's top temperature may be throttled and is not learnt from
 APPROACH_BAND_K = 0.7
+# same idea but measured against the *known* per-sample setpoint instead of the run top:
+# a room within this distance below its current setpoint while "heating" is a throttling
+# valve, so its effort is unknown
+SETPOINT_BAND_K = 0.6
 FULL_EFFORT = 0.99
 ON_OFF_FULL_SHARE = 0.5  # share of heating rows at full effort for on/off reporting
 
@@ -81,14 +90,32 @@ def on_off_effort(effort: list[float | None]) -> bool:
     return bool(on) and full >= ON_OFF_FULL_SHARE * len(on)
 
 
+def _setpoint_column(grid: Grid) -> list[float | None]:
+    """The grid's setpoint column, padded to ``len(grid)`` with None.
+
+    Grids built positionally in tests (and very old snapshots) may carry a shorter or
+    empty setpoint column; treat the missing rows as "setpoint unknown".
+    """
+    n = len(grid)
+    sp = grid.setpoint
+    if len(sp) == n:
+        return sp
+    return [sp[i] if i < len(sp) else None for i in range(n)]
+
+
 def learning_effort(
-    grid: Grid, regulation: list[bool] | None = None, band_k: float = APPROACH_BAND_K
+    grid: Grid,
+    regulation: list[bool] | None = None,
+    band_k: float = APPROACH_BAND_K,
+    setpoint_band_k: float = SETPOINT_BAND_K,
 ) -> list[float | None]:
     """Effort to learn from, None where the reported effort is not the heat delivered.
 
     - ``regulation`` rows (see :func:`regulation_mask`);
-    - with on/off effort, every reported-heating row (any effort > 0, so short blips
-      too) within ``band_k`` of its run's top temperature: the valve may be throttling.
+    - with on/off effort, every reported-heating row (any effort > 0, so short blips too)
+      that is throttling. A row with a *known* setpoint throttles when the room is within
+      ``setpoint_band_k`` below that setpoint; a row without one falls back to ``band_k``
+      of its run's top temperature (old history, no setpoint recorded).
 
     The valve acts on the temperature at that moment and the heat arrives a dead time
     later, so the regression must drop row ``k`` when ``u[k−d]`` is unreliable, not row
@@ -102,13 +129,21 @@ def learning_effort(
     if not on_off_effort(grid.effort):
         return effort
     ind = grid.indoor
+    setpoint = _setpoint_column(grid)
     for k, j in heating_runs(grid, on_effort=0.0):
         temps = [t for i in range(k, j + 1) if (t := ind[i]) is not None]
         if not temps:
             continue
-        cut = max(temps) - band_k
+        top_cut = max(temps) - band_k  # fallback cut for rows without a setpoint
         for i in range(k, j + 1):
-            if (t := ind[i]) is not None and t >= cut:
+            t = ind[i]
+            if t is None:
+                continue
+            sp = setpoint[i]
+            if sp is not None:
+                if t >= sp - setpoint_band_k:
+                    effort[i] = None
+            elif t >= top_cut:
                 effort[i] = None
     return effort
 
@@ -131,16 +166,22 @@ def episode_heating_rate(
     """Median ``a`` over heat-up episodes, or None with fewer than ``min_episodes``.
 
     Episode: a heating run preceded by at least ``d_steps + 1`` rows without heating.
-    The heat-up part goes from ``start + d_steps`` (heat has arrived) to the first row
-    at the run's maximum temperature (with on/off effort: at ``APPROACH_BAND_K`` below it,
-    before a thermostatic valve throttles); it must last ``MIN_EPISODE_MINUTES`` and rise by
-    ``MIN_EPISODE_RISE_K``. Over that part ``a = ΔT/Δt + b·(mean T − mean Tout) − c``.
+    The heat-up part goes from ``start + d_steps`` (heat has arrived) to the row at which
+    the valve starts throttling, i.e. the room reaches its setpoint band (``SETPOINT_BAND_K``
+    below the known setpoint) or, with no setpoint, ``APPROACH_BAND_K`` below the run's top.
+    When the run opens with the valve already throttling against a lower setpoint (overnight
+    eco held around ~17 °C before the morning comfort target), those leading throttled rows
+    are skipped and only the genuine full-power climb is measured. The heat-up must last
+    ``MIN_EPISODE_MINUTES`` and rise by ``MIN_EPISODE_RISE_K``. Over that part
+    ``a = ΔT/Δt + b·(mean T − mean Tout) − c``.
     """
     eff, ind, out, exc = grid.effort, grid.indoor, grid.outdoor, grid.excluded
+    setpoint = _setpoint_column(grid)
     step_h = grid.step_minutes / 60.0
     pre = d_steps + 1
     rates: list[float] = []
-    band = APPROACH_BAND_K if on_off_effort(eff) else 1e-9
+    on_off = on_off_effort(eff)
+    band = APPROACH_BAND_K if on_off else 1e-9
     for k, j in heating_runs(grid):
         if k < pre or any(e is None or e > ON_EFFORT for e in eff[k - pre : k]):
             continue
@@ -151,10 +192,30 @@ def episode_heating_rate(
         if any(exc[i] or ind[i] is None for i in seg):
             continue
         top = max(ind[i] for i in seg)  # type: ignore[type-var]
-        e_end = next(i for i in seg if ind[i] >= top - band)  # type: ignore[operator]
-        # the rise starts at the lowest temperature: a run that began as regulation
-        # (throttled valve, setpoint raised later) only heats up from there
-        s = min(range(s, e_end + 1), key=lambda i: ind[i])  # type: ignore[arg-type,return-value]
+
+        def throttling(i: int, top: float = top) -> bool:
+            """True where a reported-heating row is really the valve throttling."""
+            if not on_off:
+                return ind[i] >= top - band  # type: ignore[operator]
+            sp = setpoint[i]
+            if sp is not None:
+                return ind[i] >= sp - SETPOINT_BAND_K  # type: ignore[operator]
+            return ind[i] >= top - band  # type: ignore[operator]
+
+        # skip a throttled opening (eco regulation at a lower setpoint), then take the
+        # genuine full-power climb up to where the valve starts throttling again
+        start = s
+        while start <= j and throttling(start):
+            start += 1
+        if start > j:
+            continue
+        e_end = start
+        while e_end < j and not throttling(e_end + 1):
+            e_end += 1
+        if e_end < j and throttling(e_end + 1):
+            e_end += 1  # include the row that just reached the setpoint band
+        # the rise starts at the lowest temperature of the kept climb
+        s = min(range(start, e_end + 1), key=lambda i: ind[i])  # type: ignore[arg-type,return-value]
         dur_h = (e_end - s) * step_h
         rise = ind[e_end] - ind[s]  # type: ignore[operator]
         if dur_h * 60.0 < MIN_EPISODE_MINUTES or rise < MIN_EPISODE_RISE_K:
