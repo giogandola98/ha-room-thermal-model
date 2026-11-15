@@ -10,7 +10,10 @@ so raw state rows never pile up:
 * changes closer than ``HISTORY_MIN_SPACING_S`` are coalesced (last one wins);
 * between changes the last known states are carried forward on a
   ``SAMPLE_INTERVAL_MINUTES`` grid (recorder rows only store changes; the state holds
-  until the next row), like the live grid sampling does.
+  until the next row), like the live grid sampling does, but at most
+  ``HISTORY_MAX_CARRY_MINUTES`` after the last row: a longer silence of every input is
+  HA downtime or a recorder gap, which the model then sees as missing data (indoor
+  None) instead of a flat temperature with the pre-shutdown effort.
 """
 
 from __future__ import annotations
@@ -23,7 +26,12 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
-from .const import HISTORY_CHUNK_DAYS, HISTORY_MIN_SPACING_S, SAMPLE_INTERVAL_MINUTES
+from .const import (
+    HISTORY_CHUNK_DAYS,
+    HISTORY_MAX_CARRY_MINUTES,
+    HISTORY_MIN_SPACING_S,
+    SAMPLE_INTERVAL_MINUTES,
+)
 from .inputs import ZoneInputs, build_sample
 from .rtm_core.base import Sample
 
@@ -39,6 +47,8 @@ class HistoryReducer:
         self.samples: list[Sample] = []
         self._current: dict[str, State | None] = dict.fromkeys(inputs.sample_entities)
         self._last_ts: datetime | None = None
+        self._last_row_ts: datetime | None = None
+        self._max_carry = timedelta(minutes=HISTORY_MAX_CARRY_MINUTES)
         self._grid = timedelta(minutes=SAMPLE_INTERVAL_MINUTES)
         self._spacing = timedelta(seconds=HISTORY_MIN_SPACING_S)
 
@@ -59,11 +69,16 @@ class HistoryReducer:
         self._last_ts = ts
 
     def _fill_until(self, ts: datetime) -> None:
-        """Carry the last states forward on the grid up to (excluding) ``ts``."""
+        """Carry the last states forward on the grid up to (excluding) ``ts``.
+
+        Never further than ``HISTORY_MAX_CARRY_MINUTES`` past the last recorder row.
+        """
         if self._last_ts is None or self._current.get(self.inputs.climate) is None:
             return
+        assert self._last_row_ts is not None
+        limit = self._last_row_ts + self._max_carry
         step = self._last_ts + self._grid
-        while step < ts:
+        while step < ts and step <= limit:
             self._emit(step)
             step += self._grid
 
@@ -84,6 +99,7 @@ class HistoryReducer:
             if pending_ts is None:
                 self._fill_until(ts)
             self._current[entity_id] = state
+            self._last_row_ts = ts
             pending_ts = ts
         if pending_ts is not None:
             self._emit(pending_ts)

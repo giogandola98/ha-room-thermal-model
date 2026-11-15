@@ -17,6 +17,8 @@ from custom_components.room_thermal_model.inputs import (
     indoor_temperature,
     outdoor_temperature,
 )
+from custom_components.room_thermal_model.rtm_core import ModelConfig, RCThermalModel
+from custom_components.room_thermal_model.rtm_core.grid import ts_of
 
 from .conftest import CLIMATE, EFFORT, MISSING, OUTDOOR, ROOM, WEATHER, climate_attrs
 
@@ -161,14 +163,14 @@ def test_history_forward_fill_and_gaps() -> None:
     rows = {
         CLIMATE: [
             _climate_at(T0, current=18.0, action="heating"),
-            _climate_at(T0 + timedelta(minutes=30), current=19.0, action="idle"),
-            _climate_at(T0 + timedelta(minutes=60), state="unavailable"),
-            _climate_at(T0 + timedelta(minutes=75), current=18.5, action="idle"),
+            _climate_at(T0 + timedelta(minutes=15), current=19.0, action="idle"),
+            _climate_at(T0 + timedelta(minutes=30), state="unavailable"),
+            _climate_at(T0 + timedelta(minutes=45), current=18.5, action="idle"),
         ],
         OUTDOOR: [_temp(OUTDOOR, "4.0", ts=T0 + timedelta(seconds=30))],
     }
     inputs = ZoneInputs(climate=CLIMATE, outdoor_sensor=OUTDOOR)
-    samples = reduce_states(inputs, C, [rows], T0 + timedelta(minutes=90))
+    samples = reduce_states(inputs, C, [rows], T0 + timedelta(minutes=60))
     times = [s.ts for s in samples]
     assert times == sorted(times)
     gaps = [(b - a).total_seconds() / 60 for a, b in zip(times, times[1:], strict=False)]
@@ -176,14 +178,14 @@ def test_history_forward_fill_and_gaps() -> None:
     first = samples[0]
     # The outdoor change 30 s later is coalesced into the first sample.
     assert (first.indoor_c, first.effort, first.outdoor_c) == (18.0, 1.0, 4.0)
-    at_25 = next(s for s in samples if s.ts == T0 + timedelta(minutes=25))
-    assert (at_25.indoor_c, at_25.effort) == (18.0, 1.0)
-    at_45 = next(s for s in samples if s.ts >= T0 + timedelta(minutes=45))
-    assert (at_45.indoor_c, at_45.effort) == (19.0, 0.0)
-    gap = [s for s in samples if T0 + timedelta(minutes=60) <= s.ts < T0 + timedelta(minutes=75)]
+    at_10 = next(s for s in samples if s.ts == T0 + timedelta(minutes=10))
+    assert (at_10.indoor_c, at_10.effort) == (18.0, 1.0)
+    at_20 = next(s for s in samples if s.ts >= T0 + timedelta(minutes=20))
+    assert (at_20.indoor_c, at_20.effort) == (19.0, 0.0)
+    gap = [s for s in samples if T0 + timedelta(minutes=30) <= s.ts < T0 + timedelta(minutes=45)]
     assert gap and all(s.indoor_c is None and s.excluded for s in gap)
     assert samples[-1].indoor_c == 18.5
-    assert samples[-1].ts <= T0 + timedelta(minutes=90)
+    assert samples[-1].ts <= T0 + timedelta(minutes=60)
 
 
 def test_history_across_windows() -> None:
@@ -195,3 +197,29 @@ def test_history_across_windows() -> None:
     last = samples[-1]
     assert last.indoor_c == 18.0
     assert last.outdoor_c == 2.0
+
+
+def test_history_does_not_fill_downtime() -> None:
+    """A recorder gap (HA down 3 h) is not filled with the pre-shutdown states."""
+    rows = {
+        CLIMATE: [
+            _climate_at(T0, current=18.0, action="heating"),
+            _climate_at(T0 + timedelta(hours=3), current=17.0, action="idle"),
+        ],
+    }
+    samples = reduce_states(MIN, C, [rows], T0 + timedelta(hours=3, minutes=10))
+    carried = [s.ts for s in samples if T0 < s.ts < T0 + timedelta(hours=3)]
+    assert carried and max(carried) <= T0 + timedelta(minutes=15)
+    assert samples[-1].ts <= T0 + timedelta(hours=3, minutes=10)
+    assert samples[-1].indoor_c == 17.0
+
+    model = RCThermalModel(ModelConfig())
+    model.load_history(samples, replace=True)
+    grid = model._grid
+    downtime = [
+        grid.indoor[k]
+        for k in range(len(grid))
+        if ts_of(T0 + timedelta(minutes=45)) <= grid.ts(k) < ts_of(T0 + timedelta(hours=3))
+    ]
+    assert downtime and all(v is None for v in downtime)
+    assert all(e is None for k, e in enumerate(grid.effort) if grid.indoor[k] is None)

@@ -45,7 +45,13 @@ it to the outside (a lumped *RC* model), on a 5-minute grid:
   highest temperature the room can reach with the heater at full effort. It uses the
   outdoor temperature averaged over the preheat window: from the weather forecast when
   available, otherwise the current outdoor value, otherwise the model's reference
-  outdoor temperature. If `T∞` is below the target, the zone reports **unreachable**.
+  outdoor temperature. The linear model alone would let `T∞` climb far above anything a
+  room reaches (40 °C and more), so the maximum reachable temperature is capped at the
+  climate's `max_temp` (its highest setpoint) or, when the climate does not report one,
+  at 30 °C. If that capped value is below the target, the zone reports **unreachable**.
+  When the room coasts up to the target by itself during the dead time, no heating is
+  needed (0 minutes). For a preheat that starts later (preheat start), the outdoor
+  temperature at that time comes from the forecast, not from the current reading.
 - **Maturity** compares the model's 60-minute-ahead temperature forecasts with what
   really happened and with a naive "temperature stays the same" baseline, and checks
   predicted vs observed heat-up durations.
@@ -78,6 +84,18 @@ Settings → Devices & services → Add integration → **Room Thermal Model**.
 
 Options: target temperature (fixed, default 20.5 °C, or follow the climate's target),
 data half-life (21 days), history window (30 days), update interval (5 min).
+
+**Follow the climate's target and setback schedules.** "Follow the climate's target"
+uses the setpoint the climate has *right now*. With a thermostat/TRV schedule that lowers
+the setpoint overnight (e.g. 17 °C while the room is at 18 °C), the zone sees no need to
+heat: preheat minutes are 0 with reason `setpoint_below_current`, and preheat start /
+preheat now never fire before the comfort period begins. The integration has no option
+for a separate target entity, so with a setback schedule use the **fixed** target mode
+set to your comfort temperature (and let the arrival sensor decide when it matters).
+
+The history import replays the recorder: between state changes the last states are
+carried forward for at most 15 minutes. Longer silences (Home Assistant down, recorder
+gaps) are treated as missing data, like in live operation.
 Without any outdoor source the model still works but cannot follow the weather, so
 expect larger errors.
 
@@ -86,7 +104,7 @@ expect larger errors.
 | Entity | Content |
 |---|---|
 | `sensor.<zone>_preheat_minutes` | minutes of full heating needed to reach the target; unknown while learning, when unreachable or without outdoor data (attribute `reason`, e.g. `unreachable`, `no_outdoor`) |
-| `sensor.<zone>_max_reachable_temperature` | highest temperature reachable at the outdoor temperature averaged over the preheat window |
+| `sensor.<zone>_max_reachable_temperature` | highest temperature reachable at the outdoor temperature averaged over the preheat window, capped at the climate's `max_temp` (30 °C when unknown); the uncapped model value is in the `details` attribute of the preheat sensor as `t_infinity_c` |
 | `sensor.<zone>_model_maturity` | 0–100 %; attributes `rmse_c`, `baseline_rmse_c`, `duration_mae_minutes`, `heating_hours`, `cooling_hours` |
 | `sensor.<zone>_preheat_start` | latest time to start heating to be at the target on arrival (only with an arrival sensor). The room keeps cooling until then, so it is computed from the temperature the room will have at the start time, not the current one. When the target is unreachable it aims at 0.5 K below the max reachable temperature instead |
 | `binary_sensor.<zone>_preheat_now` | on when it is time to start heating (only with an arrival sensor). It latches: once on it stays on until the arrival, unless the arrival moves more than (needed minutes + 30 min) away |
@@ -96,6 +114,8 @@ When the target is unreachable, `sensor.<zone>_preheat_minutes` stays unknown wi
 `unreachable`, while preheat start and preheat now still work as described above.
 
 The `reason` attribute of the preheat sensors explains why there is no value: for example
+`setpoint_below_current` (target followed from the climate, whose current setpoint is
+below the room temperature: no preheat; see the setback note above),
 `unreachable` (the target is above the max reachable temperature), `no_outdoor` (the
 model needs outdoor data but none is available: no sensor, no forecast and no reference
 learnt yet) or `unreliable` (the learnt parameters failed the plausibility check; the

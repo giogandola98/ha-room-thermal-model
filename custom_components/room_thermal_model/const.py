@@ -66,6 +66,7 @@ UPDATE_INTERVAL_MAX: Final = 30
 SAMPLE_INTERVAL_MINUTES: Final = 5  # live grid sample (independent of the update interval)
 HISTORY_CHUNK_DAYS: Final = 7  # recorder query window
 HISTORY_MIN_SPACING_S: Final = 60  # coalesce history events closer than this
+HISTORY_MAX_CARRY_MINUTES: Final = 15  # carry recorder states forward at most this long
 SAVE_DELAY_SECONDS: Final = 600  # Store delayed save
 SNAPSHOT_MIN_INTERVAL_S: Final = 600  # at most one model.to_dict() per 10 min (unless fitted)
 FORECAST_CACHE_MINUTES: Final = 30
@@ -89,6 +90,8 @@ STATUS_UNREACHABLE: Final = "unreachable"
 STATUS_NO_OUTDOOR: Final = "no_outdoor"
 STATUS_AT_TARGET: Final = "at_target"
 STATUS_UNRELIABLE: Final = "unreliable"  # learnt parameters are physically implausible
+# target_mode climate: the current setpoint (e.g. a night setback) is below the room
+STATUS_SETPOINT_BELOW_CURRENT: Final = "setpoint_below_current"
 
 # Service fields
 ATTR_CONFIG_ENTRY_ID: Final = "config_entry_id"

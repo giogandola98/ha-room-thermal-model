@@ -75,7 +75,7 @@ class PreheatEstimate:
     target_c: float
     start_c: float | None
     outdoor_used_c: float | None  # effective (forecast-averaged) outdoor temperature
-    max_reachable_c: float | None  # T_infinity at full effort
+    max_reachable_c: float | None  # T_infinity at full effort, capped (max setpoint)
     reason: dict[str, Any] = field(default_factory=dict)
 
 
@@ -133,8 +133,13 @@ class ThermalModel(ABC):
         target_c: float,
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
+        max_c: float | None = None,
     ) -> PreheatEstimate:
-        """Minutes of full-effort heating needed to reach ``target_c`` from ``start_c``."""
+        """Minutes of full-effort heating needed to reach ``target_c`` from ``start_c``.
+
+        ``max_c`` caps the maximum reachable temperature (e.g. the climate's
+        ``max_temp``); the model applies its own default ceiling when None.
+        """
 
     @abstractmethod
     def coast(

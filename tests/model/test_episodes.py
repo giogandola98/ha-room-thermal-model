@@ -129,3 +129,33 @@ def test_old_state_without_reliable_flag_is_usable():
     state["params"].pop("reliable")
     restored = RCThermalModel.from_dict(state, ModelConfig())
     assert restored.preheat(run.samples[-1].ts, 18.0, 20.0, 10.0).reason["status"] != "unreliable"
+
+
+def test_episode_refit_keeps_unidentified_loss_rate_unreliable(monkeypatch):
+    """b stuck on a bound, no cooling estimate, episode mismatch: still unreliable."""
+    import rtm_core.model as model_mod
+    from rtm_core.episodes import EpisodeRate
+    from rtm_core.fit import B_MAX, fit_rc
+
+    def unidentified_b(ds, effort, config, *args, fixed=None, **kwargs):
+        if fixed and 1 in fixed:
+            return fit_rc(ds, effort, config, *args, fixed=fixed, **kwargs)
+        res = fit_rc(ds, effort, config, *args, fixed={**(fixed or {}), 1: B_MAX}, **kwargs)
+        if res is not None:
+            res.projected = sorted({*res.projected, "b"})
+        return res
+
+    monkeypatch.setattr(model_mod, "fit_rc", unidentified_b)
+    monkeypatch.setattr(model_mod, "cooling_tau", lambda *a, **k: None)
+    monkeypatch.setattr(
+        model_mod, "episode_heating_rate", lambda *a, **k: EpisodeRate(50.0, 3, [50.0] * 3)
+    )
+    run = syn.generate(syn.radiator_room(), 3.0, windows=False)
+    model = RCThermalModel(ModelConfig())
+    model.load_history(run.samples, replace=True)
+    summary = model.fit(run.samples[-1].ts)
+    assert "heating_rate_from_episodes" in summary["fallbacks"]
+    assert summary["reliable"] is False
+    assert summary["unreliable_reason"] == "loss_rate_unidentified"
+    est = model.preheat(run.samples[-1].ts, 18.0, 20.0, 5.0)
+    assert est.minutes is None and est.reason["status"] == "unreliable"

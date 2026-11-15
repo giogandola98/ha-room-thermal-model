@@ -399,3 +399,61 @@ async def test_status_no_outdoor(hass: HomeAssistant, fake_model: None) -> None:
     state = hass.states.get(PREHEAT)
     assert state.state == STATE_UNKNOWN
     assert state.attributes["reason"] == "no_outdoor"
+
+
+async def test_future_preheat_uses_forecast_not_current_outdoor(
+    hass: HomeAssistant, fake_model: None
+) -> None:
+    """Preheat evaluated at a future start: the forecast, not today's reading, anchors it."""
+    set_inputs(hass, full=True)
+    register_weather(hass)
+    arrival = dt_util.utcnow() + timedelta(hours=8)
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    entry = await setup_entry(hass, make_entry(hass, full=True, arrival=True))
+    coordinator = await _fitted(hass, entry)
+    now = coordinator.data.updated_at
+    calls = coordinator.model.preheat_calls
+    current = [c for c in calls if c["now"] == now]
+    future = [c for c in calls if c["now"] > now]
+    assert current and all(c["outdoor"] == 5.0 for c in current)
+    assert future and all(c["forecast"] and c["outdoor"] is None for c in future)
+
+
+async def test_future_preheat_without_forecast_keeps_current_outdoor(
+    hass: HomeAssistant, fake_model: None
+) -> None:
+    """Without a forecast the current reading is the only outdoor information."""
+    set_inputs(hass, full=True)
+    arrival = dt_util.utcnow() + timedelta(hours=8)
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    entry = make_entry(hass, full=True, arrival=True)
+    data = {k: v for k, v in entry.data.items() if k != "weather_entity"}
+    hass.config_entries.async_update_entry(entry, data=data)
+    entry = await setup_entry(hass, entry)
+    coordinator = await _fitted(hass, entry)
+    now = coordinator.data.updated_at
+    future = [c for c in coordinator.model.preheat_calls if c["now"] > now]
+    assert future and all(c["outdoor"] == 5.0 for c in future)
+
+
+async def test_climate_setpoint_below_current(hass: HomeAssistant, fake_model: None) -> None:
+    """Follow-the-climate with a setback setpoint: explicit reason instead of at_target."""
+    set_inputs(hass)
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=18.0, target=17.0))
+    entry = await setup_entry(hass, make_entry(hass, target_mode="climate"))
+    await _fitted(hass, entry)
+    state = hass.states.get(PREHEAT)
+    assert float(state.state) == 0.0
+    assert state.attributes["reason"] == "setpoint_below_current"
+
+
+async def test_climate_max_temp_caps_max_reachable(hass: HomeAssistant, fake_model: None) -> None:
+    """The climate's max_temp is passed to the model as the reachable ceiling."""
+    set_inputs(hass)
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(max_temp=26.0))
+    entry = await setup_entry(hass, make_entry(hass))
+    coordinator = await _fitted(hass, entry)
+    assert coordinator.model.preheat_calls[-1]["max_c"] == 26.0
+    hass.states.async_set(CLIMATE, "heat", climate_attrs())
+    await coordinator.async_refresh()
+    assert coordinator.model.preheat_calls[-1]["max_c"] is None

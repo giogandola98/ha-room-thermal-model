@@ -24,7 +24,7 @@ from .episodes import episode_heating_rate, learning_effort, regulation_mask
 from .fit import Dataset, FitResult, build_dataset, fit_rc
 from .forecast import mean_over, outdoor_curve, solve_duration
 from .grid import Grid, ceil_ts, dt_of, floor_ts, resample, ts_of
-from .physics import coast_temperature, equilibrium, preheat_minutes
+from .physics import coast_temperature, equilibrium, max_reachable, preheat_minutes
 from .quality import (
     HOLDOUT_FRACTION,
     Params,
@@ -219,7 +219,10 @@ class RCThermalModel(ThermalModel):
             gap = abs(res.a - episode.a_k_per_h) / episode.a_k_per_h
             if gap > EPISODE_DISAGREEMENT:
                 fixed[0] = episode.a_k_per_h
-                fixed[1] = res.b
+                if "b" not in res.projected:
+                    # keep an identified b; one stuck on a bound stays free (and, if
+                    # projected again, unreliable)
+                    fixed[1] = res.b
                 fallbacks.append("heating_rate_from_episodes")
                 res = self._refit(ds, effort, res, res.d_steps, fixed)
 
@@ -373,6 +376,7 @@ class RCThermalModel(ThermalModel):
         target_c: float,
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
+        max_c: float | None = None,
     ) -> PreheatEstimate:
         p = self._params
         if p is None:
@@ -400,10 +404,10 @@ class RCThermalModel(ThermalModel):
             return PreheatEstimate(None, False, target_c, start_c, None, None, reason)
 
         def minutes_for(tout: float) -> float | None:
-            return preheat_minutes(start_c, target_c, tout, a, b, c, d)[0]
+            return preheat_minutes(start_c, target_c, tout, a, b, c, d, max_c)[0]
 
         minutes, tout_eff, info = solve_duration(minutes_for, outdoor_for)
-        _, pinfo = preheat_minutes(start_c, target_c, tout_eff, a, b, c, d)
+        _, pinfo = preheat_minutes(start_c, target_c, tout_eff, a, b, c, d, max_c)
         t_inf = equilibrium(tout_eff, a, b, c)
         reason.update(pinfo)
         reason["solve"] = info
@@ -414,7 +418,7 @@ class RCThermalModel(ThermalModel):
             target_c=target_c,
             start_c=start_c,
             outdoor_used_c=tout_eff if p["use_outdoor"] else None,
-            max_reachable_c=t_inf,
+            max_reachable_c=max_reachable(t_inf, max_c),
             reason=reason,
         )
 

@@ -10,6 +10,7 @@ import pytest
 
 from rtm_core import ForecastPoint, ModelConfig, RCThermalModel
 from rtm_core import synthetic as syn
+from rtm_core.physics import preheat_minutes
 
 SCENARIOS = [
     (t0, target, tout)
@@ -99,7 +100,7 @@ def test_reason_contains_parameters(trained, run_of):
         "solve",
     ):
         assert key in est.reason
-    assert est.max_reachable_c == pytest.approx(est.reason["t_infinity_c"])
+    assert est.max_reachable_c == pytest.approx(min(30.0, est.reason["t_infinity_c"]))
     assert est.outdoor_used_c == 5.0
 
 
@@ -180,3 +181,26 @@ def test_from_dict_tolerates_garbage_and_reset(trained):
     m = trained("radiator", 14)
     m.reset()
     assert m.parameters() is None and m.quality().samples == 0
+
+
+def test_max_reachable_is_capped(trained, run_of):
+    """The linear T∞ (~45 °C here) is capped: 30 °C by default, else the climate max_temp."""
+    now = run_of("radiator", 14).samples[-1].ts
+    m = trained("radiator", 14)
+    est = m.preheat(now, 17.0, 21.0, 5.0)
+    assert est.reason["t_infinity_c"] > 30.0
+    assert est.max_reachable_c == 30.0
+    capped = m.preheat(now, 17.0, 21.0, 5.0, max_c=24.0)
+    assert capped.max_reachable_c == 24.0
+    assert capped.minutes == pytest.approx(est.minutes)  # dynamics unchanged
+    over = m.preheat(now, 17.0, 25.0, 5.0, max_c=24.0)
+    assert not over.reachable and over.minutes is None
+    assert over.reason["status"] == "unreachable"
+
+
+def test_preheat_zero_when_room_drifts_to_target():
+    """Gains warm the room past the target during the dead time: no heating needed."""
+    # coasting equilibrium 25 °C; after 90 min the room is at ~20.7 °C > 20.5 °C
+    minutes, info = preheat_minutes(20.0, 20.5, 0.0, 3.0, 0.1, 2.5, 90.0)
+    assert info["start_after_dead_time_c"] >= 20.5
+    assert minutes == 0.0
