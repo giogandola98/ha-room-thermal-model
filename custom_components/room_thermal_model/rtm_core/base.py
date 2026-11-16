@@ -64,6 +64,7 @@ class ThermalParameters:
     loss_rate_per_h: float  # b (time constant = 1/b)
     gains_k_per_h: float  # c
     dead_time_minutes: float  # d
+    reliable: bool = True  # False: implausible fit (no preheat, parameters not shown)
 
     @property
     def time_constant_hours(self) -> float:
@@ -156,8 +157,13 @@ class ThermalModel(ABC):
         minutes: float,
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
+        floor_c: float | None = None,
     ) -> float | None:
-        """Predicted temperature after ``minutes`` without heating."""
+        """Predicted temperature after ``minutes`` without heating.
+
+        ``floor_c``: the thermostat holds this setpoint (a setback), so the room does not
+        cool below it. None when the model is not usable (not fitted, unreliable).
+        """
 
     @abstractmethod
     def quality(self) -> QualityReport:

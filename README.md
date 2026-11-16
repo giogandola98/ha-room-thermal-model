@@ -89,16 +89,30 @@ Settings → Devices & services → Add integration → **Room Thermal Model**.
 | Weather entity | no | forecast for the preheat window (hourly → twice daily → daily) and outdoor fallback |
 | Arrival sensor | no | any timestamp sensor (e.g. `sensor.house_next_return_eta` from [Home Return Predictor](https://github.com/giogandola98/ha-home-return-predictor)); enables preheat start / preheat now |
 
-Options: target temperature (fixed, default 20.5 °C, or follow the climate's target),
-data half-life (21 days), history window (30 days), update interval (5 min).
+Options: target temperature (fixed, default 20.5 °C; follow the climate's target; or a
+climate preset temperature), preheat preset (`comfort`), data half-life (21 days),
+history window (30 days), update interval (5 min), hold after the arrival time (30 min),
+maximum sensor age (360 min).
 
-**Follow the climate's target and setback schedules.** "Follow the climate's target"
-uses the setpoint the climate has *right now*. With a thermostat/TRV schedule that lowers
-the setpoint overnight (e.g. 17 °C while the room is at 18 °C), the zone sees no need to
-heat: preheat minutes are 0 with reason `setpoint_below_current`, and preheat start /
-preheat now never fire before the comfort period begins. The integration has no option
-for a separate target entity, so with a setback schedule use the **fixed** target mode
-set to your comfort temperature (and let the arrival sensor decide when it matters).
+**Target modes and setback schedules.** "Follow the climate's target" uses the setpoint
+the climate has *right now*. With a schedule that lowers the setpoint while nobody is
+home (e.g. eco 18 °C while the room is at 19 °C), the zone sees no need to heat: preheat
+minutes are 0 with reason `setpoint_below_current`, and preheat start / preheat now never
+fire. After 24 hours in that state with an arrival sensor, a repair issue suggests the
+preset mode. **"Thermostat preset temperature"** reads the climate's
+`preset_temperatures` attribute (Versatile Thermostat): the target is
+`preset_temperatures.<preset>_temp` of the configured preheat preset (default
+`comfort`), whatever preset is active; without that attribute the fixed target is used.
+
+**Setback floor.** When the climate's current setpoint is below the room temperature, the
+thermostat holds it: the predicted cooling before a preheat (and the temperature at
+arrival) does not go below that setpoint, so the preheat starts from the setback
+temperature rather than from a room that has cooled towards the outdoor temperature.
+
+**Dead sensors.** The indoor temperature counts as missing when the entity providing it
+has not reported for longer than the maximum sensor age (`last_reported`, which also
+moves when an unchanged value is reported); the zone then reports `no_temperature`. The
+same limit applies, per entity, to the history import.
 
 The history import replays the recorder: between state changes the last states are
 carried forward for at most 15 minutes. Longer silences (Home Assistant down, recorder
@@ -111,11 +125,12 @@ expect larger errors.
 | Entity | Content |
 |---|---|
 | `sensor.<zone>_preheat_minutes` | minutes of full heating needed to reach the target; unknown while learning, when unreachable or without outdoor data (attribute `reason`, e.g. `unreachable`, `no_outdoor`) |
-| `sensor.<zone>_max_reachable_temperature` | highest temperature reachable at the outdoor temperature averaged over the preheat window, capped at the climate's `max_temp` (30 °C when unknown); the uncapped model value is in the `details` attribute of the preheat sensor as `t_infinity_c` |
+| `sensor.<zone>_max_reachable_temperature` | highest temperature reachable at the outdoor temperature averaged over the preheat window, capped at the climate's `max_temp` (30 °C when unknown); unknown while the model is unreliable (attribute `reliable`); the uncapped model value is in the `details` attribute of the preheat sensor as `t_infinity_c` |
 | `sensor.<zone>_model_maturity` | 0–100 %; attributes `rmse_c`, `baseline_rmse_c` (1 h ahead), `rmse_4h_c`, `baseline_rmse_4h_c` (4 h ahead), `duration_mae_minutes`, `heating_hours`, `cooling_hours` |
 | `sensor.<zone>_preheat_start` | latest time to start heating to be at the target on arrival (only with an arrival sensor). The room keeps cooling until then, so it is computed from the temperature the room will have at the start time, not the current one. When the target is unreachable it aims at 0.5 K below the max reachable temperature instead |
 | `binary_sensor.<zone>_preheat_now` | on when it is time to start heating (only with an arrival sensor). It latches: once on it stays on until the arrival, also if the room reaches the target early or the arrival sensor is unknown for one or two updates. It is released when the arrival moves more than 30 min later than the arrival it latched on (attribute `arrival_at_latch`), when the arrival stays unavailable for more than two updates before its time (someone came home), or `arrival_hold_minutes` (option, default 30) after an arrival time that passed without anybody arriving. The latch survives a restart. Attributes: `arrival`, `preheat_start`, `arrival_at_latch`, `hold_until`, `lead_minutes` |
-| `sensor.<zone>_time_constant`, `_heating_rate`, `_dead_time` | diagnostic: learnt parameters |
+| `sensor.<zone>_arrival_temperature` | temperature expected at the arrival without preheating, not below the setback setpoint (only with an arrival sensor; unknown while the model is unreliable) |
+| `sensor.<zone>_time_constant`, `_heating_rate`, `_dead_time` | diagnostic: learnt parameters; **unknown while the model is unreliable** (attribute `reliable`, the raw value in `raw_value`) |
 
 When the target is unreachable, `sensor.<zone>_preheat_minutes` stays unknown with reason
 `unreachable`, while preheat start and preheat now still work as described above.
@@ -134,7 +149,7 @@ learnt parameters and merges the recorder history of the new inputs over the sto
 
 `retrain` merges the recorder history into the stored data (the recorder wins where it
 has data, so data older than the recorder retention is kept); `replace: true` discards the
-stored data and rebuilds it from the recorder only (the behaviour before 0.4). After the
+stored data and rebuilds it from the recorder only (the previous behaviour). After the
 upgrade to this version the history is merged once automatically, which fills in the
 climate setpoint of data recorded before the setpoint was tracked.
 

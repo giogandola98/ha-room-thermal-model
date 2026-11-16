@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
+    KEY_ARRIVAL_TEMPERATURE,
     KEY_DEAD_TIME,
     KEY_HEATING_RATE,
     KEY_MAX_REACHABLE,
@@ -53,6 +54,7 @@ async def async_setup_entry(
     ]
     if coordinator.inputs.arrival_sensor:
         entities.append(PreheatStartSensor(coordinator))
+        entities.append(ArrivalTemperatureSensor(coordinator))
     async_add_entities(entities)
 
 
@@ -129,6 +131,34 @@ class PreheatStartSensor(RTMSensor):
         }
 
 
+class ArrivalTemperatureSensor(RTMSensor):
+    """Room temperature at the arrival without preheating (not below a setback setpoint)."""
+
+    _key_name = KEY_ARRIVAL_TEMPERATURE
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    @property
+    def native_value(self) -> float | None:
+        """Coasted temperature at the arrival (unknown without arrival or reliable model)."""
+        zone = self.zone
+        return _round(zone.coast_c) if zone else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Arrival and setback floor used."""
+        zone = self.zone
+        if zone is None:
+            return {}
+        return {
+            "arrival": zone.arrival.isoformat() if zone.arrival else None,
+            "floor_c": _round(zone.floor_c),
+            "target_c": _round(zone.target_c),
+        }
+
+
 class MaxReachableSensor(RTMSensor):
     """Equilibrium temperature at full heating effort."""
 
@@ -145,6 +175,14 @@ class MaxReachableSensor(RTMSensor):
         if zone is None or zone.preheat is None:
             return None
         return _round(zone.preheat.max_reachable_c)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Reliability of the model (unknown value when unreliable)."""
+        zone = self.zone
+        if zone is None or zone.parameters is None:
+            return {}
+        return {"reliable": zone.parameters.reliable}
 
 
 class ModelMaturitySensor(RTMSensor):
@@ -192,14 +230,31 @@ class RTMParameterSensor(RTMSensor):
     def _value(self) -> float | None:
         raise NotImplementedError
 
-    @property
-    def native_value(self) -> float | None:
-        """Unknown before the first fit."""
+    def _raw(self) -> float | None:
         zone = self.zone
         if zone is None or zone.parameters is None:
             return None
         value = self._value()
         return _round(value) if value is not None and value != float("inf") else None
+
+    @property
+    def native_value(self) -> float | None:
+        """Unknown before the first fit and while the model is unreliable."""
+        zone = self.zone
+        if zone is None or zone.parameters is None or not zone.parameters.reliable:
+            return None
+        return self._raw()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Reliability and, when unreliable, the raw learnt value (diagnostics)."""
+        zone = self.zone
+        if zone is None or zone.parameters is None:
+            return {}
+        attrs: dict[str, Any] = {"reliable": zone.parameters.reliable}
+        if not zone.parameters.reliable:
+            attrs["raw_value"] = self._raw()
+        return attrs
 
 
 class TimeConstantSensor(RTMParameterSensor):

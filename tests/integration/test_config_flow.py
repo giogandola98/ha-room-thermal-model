@@ -63,6 +63,7 @@ async def test_minimal_flow(hass: HomeAssistant) -> None:
         CONF_HALF_LIFE_DAYS: 21,
         CONF_HISTORY_DAYS: 30,
         CONF_UPDATE_INTERVAL_MINUTES: 5,
+        "preheat_preset": "comfort",
     }
     assert result["result"].unique_id == CLIMATE
 
@@ -150,6 +151,8 @@ async def test_options_flow(hass: HomeAssistant) -> None:
         CONF_HISTORY_DAYS: 60,
         CONF_UPDATE_INTERVAL_MINUTES: 10,
         "arrival_hold_minutes": 30,
+        "preheat_preset": "comfort",
+        "max_sensor_age_minutes": 360,
     }
     coordinator = entry.runtime_data
     assert coordinator.target_mode == "climate"

@@ -29,7 +29,9 @@ from .const import (
     CONF_HALF_LIFE_DAYS,
     CONF_HEAT_SOURCE,
     CONF_HISTORY_DAYS,
+    CONF_MAX_SENSOR_AGE_MINUTES,
     CONF_OUTDOOR_SENSOR,
+    CONF_PREHEAT_PRESET,
     CONF_ROOM_SENSOR,
     CONF_TARGET_MODE,
     CONF_TARGET_TEMPERATURE,
@@ -39,6 +41,8 @@ from .const import (
     DEFAULT_ARRIVAL_HOLD_MINUTES,
     DEFAULT_HALF_LIFE_DAYS,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_MAX_SENSOR_AGE_MINUTES,
+    DEFAULT_PREHEAT_PRESET,
     DEFAULT_TARGET_MODE,
     DEFAULT_TARGET_TEMPERATURE,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
@@ -47,7 +51,11 @@ from .const import (
     HALF_LIFE_DAYS_MIN,
     HISTORY_DAYS_MAX,
     HISTORY_DAYS_MIN,
+    MAX_SENSOR_AGE_MAX,
+    MAX_SENSOR_AGE_MIN,
+    PRESET_SUGGESTIONS,
     TARGET_MODE_CLIMATE,
+    TARGET_MODE_CLIMATE_PRESET,
     TARGET_MODE_FIXED,
     TARGET_TEMPERATURE_MAX,
     TARGET_TEMPERATURE_MIN,
@@ -77,13 +85,20 @@ def _target_fields() -> dict[Any, Any]:
     return {
         vol.Required(CONF_TARGET_MODE, default=DEFAULT_TARGET_MODE): SelectSelector(
             SelectSelectorConfig(
-                options=[TARGET_MODE_FIXED, TARGET_MODE_CLIMATE],
+                options=[TARGET_MODE_FIXED, TARGET_MODE_CLIMATE, TARGET_MODE_CLIMATE_PRESET],
                 translation_key=CONF_TARGET_MODE,
                 mode=SelectSelectorMode.LIST,
             )
         ),
         vol.Required(CONF_TARGET_TEMPERATURE, default=DEFAULT_TARGET_TEMPERATURE): _number(
             TARGET_TEMPERATURE_MIN, TARGET_TEMPERATURE_MAX, TARGET_TEMPERATURE_STEP, "°C"
+        ),
+        vol.Optional(CONF_PREHEAT_PRESET, default=DEFAULT_PREHEAT_PRESET): SelectSelector(
+            SelectSelectorConfig(
+                options=list(PRESET_SUGGESTIONS),
+                custom_value=True,
+                mode=SelectSelectorMode.DROPDOWN,
+            )
         ),
     }
 
@@ -145,6 +160,9 @@ class RoomThermalModelConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_TARGET_TEMPERATURE: float(
                         user_input.get(CONF_TARGET_TEMPERATURE, DEFAULT_TARGET_TEMPERATURE)
                     ),
+                    CONF_PREHEAT_PRESET: str(
+                        user_input.get(CONF_PREHEAT_PRESET) or DEFAULT_PREHEAT_PRESET
+                    ),
                     CONF_HALF_LIFE_DAYS: DEFAULT_HALF_LIFE_DAYS,
                     CONF_HISTORY_DAYS: DEFAULT_HISTORY_DAYS,
                     CONF_UPDATE_INTERVAL_MINUTES: DEFAULT_UPDATE_INTERVAL_MINUTES,
@@ -205,6 +223,12 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
                     CONF_ARRIVAL_HOLD_MINUTES: int(
                         user_input.get(CONF_ARRIVAL_HOLD_MINUTES, DEFAULT_ARRIVAL_HOLD_MINUTES)
                     ),
+                    CONF_PREHEAT_PRESET: str(
+                        user_input.get(CONF_PREHEAT_PRESET) or DEFAULT_PREHEAT_PRESET
+                    ),
+                    CONF_MAX_SENSOR_AGE_MINUTES: int(
+                        user_input.get(CONF_MAX_SENSOR_AGE_MINUTES, DEFAULT_MAX_SENSOR_AGE_MINUTES)
+                    ),
                 }
             )
         current = {
@@ -214,6 +238,8 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
             CONF_HISTORY_DAYS: DEFAULT_HISTORY_DAYS,
             CONF_UPDATE_INTERVAL_MINUTES: DEFAULT_UPDATE_INTERVAL_MINUTES,
             CONF_ARRIVAL_HOLD_MINUTES: DEFAULT_ARRIVAL_HOLD_MINUTES,
+            CONF_PREHEAT_PRESET: DEFAULT_PREHEAT_PRESET,
+            CONF_MAX_SENSOR_AGE_MINUTES: DEFAULT_MAX_SENSOR_AGE_MINUTES,
             **self.config_entry.options,
         }
         schema = vol.Schema(
@@ -230,6 +256,9 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
                 ),
                 vol.Optional(CONF_ARRIVAL_HOLD_MINUTES): _number(
                     ARRIVAL_HOLD_MIN, ARRIVAL_HOLD_MAX, 5, "min"
+                ),
+                vol.Optional(CONF_MAX_SENSOR_AGE_MINUTES): _number(
+                    MAX_SENSOR_AGE_MIN, MAX_SENSOR_AGE_MAX, 10, "min"
                 ),
             }
         )

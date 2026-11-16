@@ -414,7 +414,9 @@ class RCThermalModel(ThermalModel):
         p = self._params
         if p is None:
             return None
-        return ThermalParameters(p["a"], p["b"], p["c"], p["d_minutes"])
+        return ThermalParameters(
+            p["a"], p["b"], p["c"], p["d_minutes"], bool(p.get("reliable", True))
+        )
 
     def last_fit_summary(self) -> dict[str, Any]:
         """Summary of the last fit (diagnostics)."""
@@ -501,15 +503,19 @@ class RCThermalModel(ThermalModel):
         minutes: float,
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
+        floor_c: float | None = None,
     ) -> float | None:
         p = self._params
-        if p is None:
+        if p is None or not p.get("reliable", True):
             return None
         outdoor_for, _ = self._outdoor_function(now, outdoor_c, forecast)
         if outdoor_for is None:
             return None
         tout = outdoor_for(max(0.0, minutes))
-        return coast_temperature(start_c, max(0.0, minutes), tout, p["b"], p["c"])
+        temp = coast_temperature(start_c, max(0.0, minutes), tout, p["b"], p["c"])
+        if floor_c is not None and floor_c < start_c:
+            temp = max(temp, floor_c)
+        return temp
 
     def quality(self) -> QualityReport:
         q = self._quality
