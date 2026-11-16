@@ -6,7 +6,7 @@ https://github.com/Ecronika/ha-preheat — re-implemented here on the model grid
 For every segment without heating (≥ 60 min, ≥ 8 points) the indoor temperature
 relaxes towards the outdoor temperature: ``ln(T_in − mean(T_out))`` is fitted by
 ordinary least squares against time; ``τ = −1/slope``. Segments are accepted when
-R² > 0.5 and 0.5 h < τ < 48 h; the result is the length-weighted median.
+R² > 0.5 and 0.5 h < τ < 200 h; the result is the length-weighted median.
 
 Internal gains shift the true asymptote above ``T_out`` and bias τ: the main fit is
 preferred and this estimate is only used when the main fit lacks excitation.
@@ -22,7 +22,7 @@ from .grid import Grid
 MIN_SEGMENT_MINUTES = 60.0
 MIN_POINTS = 8
 MIN_R2 = 0.5
-TAU_MIN_H, TAU_MAX_H = 0.5, 48.0
+TAU_MIN_H, TAU_MAX_H = 0.5, 200.0
 OFF_EFFORT = 0.01
 MIN_DELTA_K = 0.5
 

@@ -25,9 +25,12 @@ it to the outside (a lumped *RC* model), on a 5-minute grid:
 | dead time (min) | lag before the radiator starts warming the room |
 
 - **Learning** uses *all* history, not only preheat sessions: periods with the heater off
-  teach heat loss, periods with it on teach heating power. A robust (Huber) weighted
-  least-squares fit down-weights anomalies such as an open window, and recent data
-  weighs more (half-life 21 days). On first start the recorder history is imported, so
+  teach heat loss, periods with it on teach heating power. A weighted least-squares fit
+  drops sustained anomalies such as an open window (residuals far outside the usual
+  spread for 15 minutes or more), and recent data weighs more (half-life 21 days). Many
+  room sensors only report when the temperature changed by ~0.1 K (or once an hour): for
+  fitting, the readings are interpolated linearly between those changes (up to 3 h), so a
+  slow room is not mistaken for one whose temperature never moves. On first start the recorder history is imported, so
   the model is useful from day one if you have a few days of history.
 - **Thermostatic valves**: a thermostat (or Versatile Thermostat over TRVs) keeps
   reporting `heating` for hours while the valve only trickles to hold the setpoint, or
@@ -41,7 +44,7 @@ it to the outside (a lumped *RC* model), on a 5-minute grid:
   regression disagrees by more than 30 %, that measured rate is used. When the data
   cannot identify the heat loss, the time constant comes from free-cooling periods.
 - **Plausibility**: if the learnt parameters are physically implausible (full heating
-  would settle more than 50 K above the outdoor temperature, or the heat loss cannot be
+  would settle more than 150 K above the outdoor temperature, or the heat loss cannot be
   identified) the zone reports **unreliable**: no preheat value, maturity 0.
 - **Preheat minutes** come from the exact solution of the model. The heat takes the dead
   time `d` to arrive, so the room first coasts (no heating) for `d` minutes to a
@@ -159,6 +162,7 @@ sensor" input to `sensor.<zone>_preheat_minutes`.
 pip install -r requirements_test.txt
 pytest                     # pure model tests (no HA) + integration tests
 python scripts/simulate.py --days 30   # synthetic rooms: learning curve
+python -I scripts/replay/replay_fit.py diag_zone.json   # refit + score a diagnostics dump
 ```
 
 The model core (`rtm_core/`) is pure standard-library Python behind a `ThermalModel`
