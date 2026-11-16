@@ -633,6 +633,16 @@ async def test_setback_floor_limits_cooling_before_preheat(
     assert model.preheat_calls[-1]["start"] == pytest.approx(18.0)
     assert coordinator.data.floor_c == 18.0
     assert hass.states.get(f"sensor.{SLUG}_arrival_temperature").state == "18.0"
+    # HVAC off holds nothing: the room coasts freely (1 K/h in the fake model)
+    hass.states.async_set(
+        CLIMATE,
+        "off",
+        climate_attrs(current=20.0, target=18.0, preset_temperatures=VTHERM_PRESETS),
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await coordinator.async_refresh()
+    assert coordinator.data.floor_c is None
+    assert coordinator.data.lead_minutes > 60
 
 
 async def test_stale_room_sensor_is_no_temperature(

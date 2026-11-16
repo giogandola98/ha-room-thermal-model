@@ -580,8 +580,12 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         # a setback setpoint below the room: the thermostat holds it, the room does not
         # coast below it before the preheat
         setpoint = climate_target(climate_state, self.system_unit)
+        # (an HVAC mode "off" holds nothing, whatever its temperature attribute says)
+        holding = climate_state is not None and climate_state.state not in ("off", *INVALID_STATES)
         floor_c = (
-            setpoint if setpoint is not None and indoor is not None and setpoint < indoor else None
+            setpoint
+            if holding and setpoint is not None and indoor is not None and setpoint < indoor
+            else None
         )
         estimate: PreheatEstimate | None = None
         coast_c: float | None = None
