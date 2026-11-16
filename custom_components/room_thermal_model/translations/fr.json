@@ -122,7 +122,7 @@
   "services": {
     "retrain": {
       "name": "Réentraîner",
-      "description": "Recharge l'historique du recorder et réajuste le modèle des zones sélectionnées (toutes les zones si aucune cible).",
+      "description": "Fusionne l'historique du recorder avec les données enregistrées et réajuste le modèle des zones sélectionnées (toutes les zones si aucune cible).",
       "fields": {
         "entity_id": {
           "name": "Entités",
@@ -131,6 +131,10 @@
         "config_entry_id": {
           "name": "Zone",
           "description": "Entrée de configuration de la zone. Laissez vide pour toutes les zones."
+        },
+        "replace": {
+          "name": "Remplacer",
+          "description": "Supprime les données enregistrées et reconstruit le modèle uniquement à partir de l'historique du recorder. Désactivé (par défaut) : l'historique du recorder est fusionné avec les données enregistrées (le recorder l'emporte là où il a des données), les données plus anciennes sont conservées."
         }
       }
     },

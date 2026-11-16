@@ -174,6 +174,8 @@ class ModelMaturitySensor(RTMSensor):
             "cooling_hours": _round(quality.cooling_hours, 1),
             "rmse_c": _round(quality.rmse_c, 3),
             "baseline_rmse_c": _round(quality.baseline_rmse_c, 3),
+            "rmse_4h_c": _round(quality.rmse_4h_c, 3),
+            "baseline_rmse_4h_c": _round(quality.baseline_rmse_4h_c, 3),
             "duration_mae_minutes": _round(quality.duration_mae_minutes, 1),
             "episodes": quality.episodes,
             "last_fit": zone.last_fit.isoformat() if zone.last_fit else None,

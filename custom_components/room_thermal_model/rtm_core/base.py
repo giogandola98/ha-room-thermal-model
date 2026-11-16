@@ -95,6 +95,8 @@ class QualityReport:
     baseline_rmse_c: float | None  # persistence baseline RMSE
     duration_mae_minutes: float | None  # observed heat-up episodes
     episodes: int = 0
+    rmse_4h_c: float | None = None  # 4-h-ahead simulated forecast RMSE
+    baseline_rmse_4h_c: float | None = None
 
 
 class ThermalModel(ABC):
@@ -102,7 +104,8 @@ class ThermalModel(ABC):
 
     Lifecycle used by the integration:
       1. ``load_history`` on bootstrap / retrain (raw samples, any spacing; the model
-         resamples to its grid). ``replace=False`` merges with what is already stored.
+         resamples to its grid). ``replace=False`` merges with what is already stored
+         (the history wins where it has data).
       2. ``add_sample`` for every live observation (any spacing).
       3. ``fit_due`` / ``fit`` periodically (fit is CPU work: caller runs it in an executor).
       4. ``preheat`` / ``coast`` / ``parameters`` / ``quality`` (pure, cheap).
@@ -163,6 +166,10 @@ class ThermalModel(ABC):
     @abstractmethod
     def reset(self) -> None:
         """Forget everything learnt."""
+
+    def reset_parameters(self) -> None:
+        """Forget the learnt parameters but keep the data (default: forget everything)."""
+        self.reset()
 
     @abstractmethod
     def to_dict(self) -> dict[str, Any]:

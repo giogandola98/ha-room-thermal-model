@@ -122,7 +122,7 @@
   "services": {
     "retrain": {
       "name": "Riaddestra",
-      "description": "Ricarica lo storico del recorder e riadatta il modello delle zone selezionate (tutte le zone senza destinazione).",
+      "description": "Unisce lo storico del recorder ai dati salvati e riadatta il modello delle zone selezionate (tutte le zone senza destinazione).",
       "fields": {
         "entity_id": {
           "name": "Entità",
@@ -131,6 +131,10 @@
         "config_entry_id": {
           "name": "Zona",
           "description": "Voce di configurazione della zona. Lascia vuoto per tutte le zone."
+        },
+        "replace": {
+          "name": "Sostituisci",
+          "description": "Scarta i dati salvati e ricostruisce il modello solo dallo storico del recorder. Disattivato (predefinito): lo storico del recorder viene unito ai dati salvati (il recorder prevale dove ha dati), così i dati più vecchi della conservazione del recorder restano."
         }
       }
     },

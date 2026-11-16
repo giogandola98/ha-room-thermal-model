@@ -1,5 +1,10 @@
 retrain:
   fields:
+    replace:
+      required: false
+      default: false
+      selector:
+        boolean:
     entity_id:
       required: false
       selector:

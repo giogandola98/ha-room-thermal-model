@@ -205,7 +205,15 @@ def run(path: str, horizons: list[float], bands: list[float], verbose: bool = Fa
     print(
         f"  holdout (model): rmse_1h={q['rmse_c']} base={q['baseline_rmse_c']} "
         f"maturity={q['maturity']} episodes={q['episodes']} "
-        f"duration_mae={q['duration_mae_minutes']}"
+        f"duration_mae={q['duration_mae_minutes']} rmse_4h={q.get('rmse_4h_c')}"
+        f"/{q.get('baseline_rmse_4h_c')}"
+    )
+    ep = s.get("episode_heating_rate") or {}
+    sp = [v for v in model._grid.setpoint if v is not None]
+    print(
+        f"  episodes: rate={ep.get('episodes', 0)} (a={ep.get('a_k_per_h')})  "
+        f"heat-ups total={s.get('heat_up_episodes_total')}  "
+        f"setpoint rows={len(sp) / max(1, len(model._grid)):.0%}"
     )
     p = model._params
     assert p is not None

@@ -21,7 +21,10 @@ looks like "heating with no effect".
 - :func:`episode_heating_rate`: the full-effort heating rate measured directly on the
   heat-up part of real episodes (the room was idle before, the temperature rose), with
   the loss and gains of the current parameters added back. Robust (median) and
-  independent of the regression, it replaces ``a`` when the two disagree.
+  independent of the regression, it replaces ``a`` when the two disagree. A heat-up is
+  often reported as several runs separated by short pauses (burner cycling, a valve
+  briefly closing): runs with pauses up to ``MERGE_PAUSE_MINUTES`` form one episode and
+  the measured rate is divided by the duty cycle of the effort over the climb.
 """
 
 from __future__ import annotations
@@ -41,6 +44,11 @@ APPROACH_BAND_K = 0.7
 # a room within this distance below its current setpoint while "heating" is a throttling
 # valve, so its effort is unknown
 SETPOINT_BAND_K = 0.6
+# without a setpoint the episode climb ends this far below the run's top: a wider band
+# (``APPROACH_BAND_K``) would discard every heat-up smaller than ~1 K
+EPISODE_TOP_BAND_K = 0.3
+MERGE_PAUSE_MINUTES = 15.0  # pauses up to this long inside a heat-up are one episode
+MIN_DUTY = 0.3
 FULL_EFFORT = 0.99
 ON_OFF_FULL_SHARE = 0.5  # share of heating rows at full effort for on/off reporting
 
@@ -62,6 +70,28 @@ def heating_runs(grid: Grid, on_effort: float = ON_EFFORT) -> list[tuple[int, in
         else:
             k += 1
     return runs
+
+
+def merged_runs(
+    grid: Grid, on_effort: float = ON_EFFORT, max_pause_minutes: float = MERGE_PAUSE_MINUTES
+) -> list[tuple[int, int]]:
+    """:func:`heating_runs` with runs separated by short known-idle pauses merged.
+
+    Only pauses whose rows all have a known effort are bridged (missing data is not a
+    pause).
+    """
+    max_rows = int(max_pause_minutes / grid.step_minutes + 1e-9)
+    eff = grid.effort
+    out: list[tuple[int, int]] = []
+    for k, j in heating_runs(grid, on_effort):
+        if out:
+            k0, j0 = out[-1]
+            gap = range(j0 + 1, k)
+            if len(gap) <= max_rows and all(eff[i] is not None for i in gap):
+                out[-1] = (k0, j)
+                continue
+        out.append((k, j))
+    return out
 
 
 def regulation_mask(grid: Grid, tolerance_k: float = PLATEAU_TOLERANCE_K) -> list[bool]:
@@ -165,15 +195,17 @@ def episode_heating_rate(
 ) -> EpisodeRate | None:
     """Median ``a`` over heat-up episodes, or None with fewer than ``min_episodes``.
 
-    Episode: a heating run preceded by at least ``d_steps + 1`` rows without heating.
+    Episode: a heating run (pauses ≤ ``MERGE_PAUSE_MINUTES`` merged, see
+    :func:`merged_runs`) preceded by at least ``d_steps + 1`` rows without heating.
     The heat-up part goes from ``start + d_steps`` (heat has arrived) to the row at which
     the valve starts throttling, i.e. the room reaches its setpoint band (``SETPOINT_BAND_K``
-    below the known setpoint) or, with no setpoint, ``APPROACH_BAND_K`` below the run's top.
+    below the known setpoint) or, with no setpoint, ``EPISODE_TOP_BAND_K`` below the run's top.
     When the run opens with the valve already throttling against a lower setpoint (overnight
     eco held around ~17 °C before the morning comfort target), those leading throttled rows
     are skipped and only the genuine full-power climb is measured. The heat-up must last
     ``MIN_EPISODE_MINUTES`` and rise by ``MIN_EPISODE_RISE_K``. Over that part
-    ``a = ΔT/Δt + b·(mean T − mean Tout) − c``.
+    ``a = (ΔT/Δt + b·(mean T − mean Tout) − c) / duty`` where ``duty`` is the mean effort
+    that acted on the climb (``u[i − d]``; 1 for an uninterrupted run).
     """
     eff, ind, out, exc = grid.effort, grid.indoor, grid.outdoor, grid.excluded
     setpoint = _setpoint_column(grid)
@@ -181,8 +213,8 @@ def episode_heating_rate(
     pre = d_steps + 1
     rates: list[float] = []
     on_off = on_off_effort(eff)
-    band = APPROACH_BAND_K if on_off else 1e-9
-    for k, j in heating_runs(grid):
+    band = EPISODE_TOP_BAND_K if on_off else 1e-9
+    for k, j in merged_runs(grid):
         if k < pre or any(e is None or e > ON_EFFORT for e in eff[k - pre : k]):
             continue
         s = k + d_steps
@@ -229,7 +261,11 @@ def episode_heating_rate(
             mean_out = sum(outs) / len(outs)
         else:
             mean_out = 0.0
-        rates.append(rise / dur_h + b * (mean_t - mean_out) - c)
+        acting = [eff[i - d_steps] for i in range(s, e_end)]
+        duty = sum(e for e in acting if e is not None) / len(acting)
+        if duty < MIN_DUTY:
+            continue
+        rates.append((rise / dur_h + b * (mean_t - mean_out) - c) / min(1.0, duty))
     if len(rates) < min_episodes:
         return None
     srt = sorted(rates)

@@ -122,7 +122,7 @@
   "services": {
     "retrain": {
       "name": "Retrain",
-      "description": "Reload the recorder history and refit the model of the selected zones (all zones without a target).",
+      "description": "Merge the recorder history into the stored data and refit the model of the selected zones (all zones without a target).",
       "fields": {
         "entity_id": {
           "name": "Entities",
@@ -131,6 +131,10 @@
         "config_entry_id": {
           "name": "Zone",
           "description": "Config entry of the zone. Leave empty for all zones."
+        },
+        "replace": {
+          "name": "Replace",
+          "description": "Discard the stored data and rebuild the model from the recorder history only. Off (default): the recorder history is merged into the stored data (the recorder wins where it has data), so data older than the recorder retention is kept."
         }
       }
     },

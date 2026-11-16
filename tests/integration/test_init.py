@@ -221,7 +221,9 @@ async def test_store_round_trip(
     key = f"{DOMAIN}.{entry.entry_id}"
     stored = hass_storage[key]
     assert stored["version"] == 1
+    assert stored["minor_version"] == 2
     assert stored["data"]["schema"] == 1
+    assert stored["data"]["history_merged"] == 2
     assert stored["data"]["bootstrapped"] is True
     assert stored["data"]["model"]["fake"] is True
 
@@ -274,10 +276,48 @@ async def test_unknown_model_version_bootstraps(
     no_history.assert_called_once()
 
 
-async def test_changed_inputs_reimport_history(
+async def test_changed_inputs_keep_data_reset_parameters(
     hass: HomeAssistant, fake_model: None, hass_storage: dict[str, Any], no_history: Any
 ) -> None:
-    """A model learnt from other inputs is not restored; the history is imported again."""
+    """Other inputs: the data stays, the parameters are refitted, the history re-merged."""
+    set_inputs(hass)
+    entry = make_entry(hass)
+    key = f"{DOMAIN}.{entry.entry_id}"
+    document = {
+        "schema": 1,
+        "model": {"fake": True, "fitted": True},
+        "last_fit": None,
+        "bootstrapped": True,
+        "inputs": [CLIMATE],
+        "history_merged": 2,
+    }
+    stored = {"version": 1, "minor_version": 2, "key": key, "data": document}
+
+    hass_storage[key] = stored
+    await setup_entry(hass, entry)
+    no_history.assert_not_called()  # same inputs, already merged: restored as is
+    assert entry.runtime_data.model.params is not None
+    assert entry.runtime_data.model.parameter_resets == 0
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass_storage[key]["data"]["inputs"] == [CLIMATE]
+
+    document["inputs"] = [CLIMATE, "sensor.old_room"]
+    hass_storage[key] = stored
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    model = entry.runtime_data.model
+    no_history.assert_called_once()
+    assert no_history.call_count == 1
+    assert model.params is None
+    assert model.parameter_resets == 1 and model.resets == 0  # data kept
+    assert entry.runtime_data.history_merged == 2
+
+
+async def test_store_v1_1_is_merged_with_history_once(
+    hass: HomeAssistant, fake_model: None, hass_storage: dict[str, Any], no_history: Any
+) -> None:
+    """A 1.1 document loads, the recorder history is merged once, then never again."""
     set_inputs(hass)
     entry = make_entry(hass)
     key = f"{DOMAIN}.{entry.entry_id}"
@@ -288,22 +328,42 @@ async def test_changed_inputs_reimport_history(
         "bootstrapped": True,
         "inputs": [CLIMATE],
     }
-    stored = {"version": 1, "minor_version": 1, "key": key, "data": document}
+    hass_storage[key] = {"version": 1, "minor_version": 1, "key": key, "data": document}
+    from datetime import UTC, datetime
 
-    hass_storage[key] = stored
+    no_history.return_value = [
+        Sample(datetime(2026, 1, 1, tzinfo=UTC), 19.0, 5.0, 1.0, False, 20.0)
+    ]
     await setup_entry(hass, entry)
-    no_history.assert_not_called()  # same inputs: restored
-    assert entry.runtime_data.model.params is not None
+    coordinator = entry.runtime_data
+    assert no_history.call_count == 1  # one-off merge
+    assert coordinator.model.params is not None  # learning kept
+    assert coordinator.model.resets == 0
+    assert coordinator.model.history_calls == [False]  # merged, not replaced
+    assert coordinator.history_merged == 2
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
-    assert hass_storage[key]["data"]["inputs"] == [CLIMATE]
+    assert hass_storage[key]["minor_version"] == 2
+    assert hass_storage[key]["data"]["history_merged"] == 2
 
-    document["inputs"] = [CLIMATE, "sensor.old_room"]
-    hass_storage[key] = stored
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
-    no_history.assert_called_once()
-    assert entry.runtime_data.model.params is None
+    assert no_history.call_count == 1  # not again
+
+
+async def test_store_v1_1_flag_set_without_recorder_data(
+    hass: HomeAssistant, fake_model: None, hass_storage: dict[str, Any], no_history: Any
+) -> None:
+    """No recorder history (retention, recorder off): the one-off flag is set anyway."""
+    set_inputs(hass)
+    entry = make_entry(hass)
+    key = f"{DOMAIN}.{entry.entry_id}"
+    document = {"schema": 1, "model": {"fake": True, "fitted": True}, "bootstrapped": True}
+    hass_storage[key] = {"version": 1, "minor_version": 1, "key": key, "data": document}
+    await setup_entry(hass, entry)
+    assert no_history.call_count == 1
+    assert entry.runtime_data.history_merged == 2
+    assert entry.runtime_data.model.params is not None
 
 
 async def test_remove_entry_deletes_store(

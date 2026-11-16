@@ -486,8 +486,9 @@ def fit_rc(
         return None
 
     # 1) outlier mask from the best plain (prior-regularised) WLS solution
-    d0 = min(cands, key=lambda d: (_mse(prob.solve(d)), d))
-    sol = prob.solve(d0)
+    plain = {d: prob.solve(d) for d in cands}
+    d0 = min(cands, key=lambda d: (_mse(plain[d]), d))
+    sol = plain[d0]
     scale = 1.4826 * _mad(sol.resid)
     if mask is None:
         masked: frozenset[int] = frozenset()
@@ -507,7 +508,7 @@ def fit_rc(
     crit: dict[int, float] = {}
     sols: dict[int, _Solved] = {}
     for d in cands:
-        sols[d] = prob.solve(d, masked)
+        sols[d] = prob.solve(d, masked) if masked else plain[d]
         crit[d] = _mse(sols[d])
     best = min(cands, key=lambda d: (crit[d], d))
     sol = sols[best]

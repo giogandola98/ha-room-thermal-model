@@ -39,6 +39,10 @@ SERVICE_EXPORT_DIAGNOSTICS: Final = "export_diagnostics"
 
 # Storage
 STORAGE_VERSION: Final = 1
+# 1.2: ``history_merged`` flag (recorder history re-merged once after the upgrade that
+# made history merging fill the setpoint column)
+STORAGE_MINOR_VERSION: Final = 2
+HISTORY_MERGE_VERSION: Final = 2
 
 # Entity keys (translation_key == key; unique_id = f"{entry_id}_{key}";
 # entity_id = f"{platform}.{zone_slug}_{key}")
@@ -68,7 +72,8 @@ HISTORY_CHUNK_DAYS: Final = 7  # recorder query window
 HISTORY_MIN_SPACING_S: Final = 60  # coalesce history events closer than this
 HISTORY_MAX_CARRY_MINUTES: Final = 15  # carry recorder states forward at most this long
 SAVE_DELAY_SECONDS: Final = 600  # Store delayed save
-SNAPSHOT_MIN_INTERVAL_S: Final = 600  # at most one model.to_dict() per 10 min (unless fitted)
+SNAPSHOT_MIN_INTERVAL_S: Final = 3600  # at most one model.to_dict() per hour (unless fitted)
+SAMPLE_DEBOUNCE_S: Final = 60  # at most one state-change sample per entity per minute
 FORECAST_CACHE_MINUTES: Final = 30
 FORECAST_TYPES: Final = ("hourly", "twice_daily", "daily")
 FALLBACK_EFFORT_MARGIN_K: Final = 0.2  # no hvac_action: heating when target > current + this

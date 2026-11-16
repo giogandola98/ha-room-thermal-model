@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from unittest.mock import patch
 
+import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
@@ -116,23 +117,50 @@ async def test_status_unreachable_at_target_no_temperature(
     assert state.attributes["reason"] == "no_temperature"
 
 
-async def test_live_samples_effort(hass: HomeAssistant, fake_model: None) -> None:
+async def test_live_samples_effort(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
     """State changes feed samples; effort from hvac_action, fallback and sensor."""
     set_inputs(hass)
     entry = await setup_entry(hass, make_entry(hass))
     model: FakeModel = entry.runtime_data.model
-    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=19.2, action="heating"))
-    await hass.async_block_till_done(wait_background_tasks=True)
+
+    async def change(state: str, attrs: dict) -> None:
+        freezer.tick(timedelta(seconds=61))  # outside the per-entity debounce window
+        hass.states.async_set(CLIMATE, state, attrs)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    await change("heat", climate_attrs(current=19.2, action="heating"))
     assert (model.samples[-1].indoor_c, model.samples[-1].effort) == (19.2, 1.0)
-    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=19.4, action=MISSING))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await change("heat", climate_attrs(current=19.4, action=MISSING))
     assert model.samples[-1].effort == 1.0  # 21 > 19.4 + 0.2
-    hass.states.async_set(CLIMATE, "off", climate_attrs(current=19.4, action=MISSING))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await change("off", climate_attrs(current=19.4, action=MISSING))
     assert model.samples[-1].effort == 0.0
-    hass.states.async_set(CLIMATE, "unavailable", {})
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await change("unavailable", {})
     assert model.samples[-1].excluded
+
+
+async def test_attribute_bursts_are_debounced(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
+    """A burst of attribute updates gives one sample now and one with the final state."""
+    set_inputs(hass)
+    entry = await setup_entry(hass, make_entry(hass))
+    model: FakeModel = entry.runtime_data.model
+    freezer.tick(timedelta(seconds=61))
+    count = len(model.samples)
+    for i in range(20):
+        hass.states.async_set(
+            CLIMATE, "heat", climate_attrs(current=19.0 + i / 100, action="heating", seq=i)
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+        freezer.tick(timedelta(seconds=1))
+    assert len(model.samples) - count == 1
+    freezer.tick(timedelta(seconds=60))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(model.samples) - count >= 2  # deferred sample (and the next poll)
+    assert model.samples[-1].indoor_c == pytest.approx(19.19)  # latest state, not lost
 
 
 async def test_effort_sensor_samples(hass: HomeAssistant, fake_model: None) -> None:
