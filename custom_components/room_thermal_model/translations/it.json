@@ -69,14 +69,16 @@
           "target_temperature": "Obiettivo fisso",
           "half_life_days": "Emivita dello storico",
           "history_days": "Storico da cui imparare",
-          "update_interval_minutes": "Intervallo di aggiornamento"
+          "update_interval_minutes": "Intervallo di aggiornamento",
+          "arrival_hold_minutes": "Mantenimento dopo l'orario di arrivo"
         },
         "data_description": {
           "target_mode": "Usa un obiettivo fisso o segui la temperatura impostata sul termostato.",
           "target_temperature": "Obiettivo in modalità fissa (anche il ripiego quando il termostato non ha una temperatura impostata).",
           "half_life_days": "I dati più vecchi pesano la metà dopo questi giorni (si adatta alle stagioni).",
           "history_days": "Giorni di storico del recorder caricati al primo avvio e dall'azione riaddestra.",
-          "update_interval_minutes": "Ogni quanti minuti viene ricalcolata la stima."
+          "update_interval_minutes": "Ogni quanti minuti viene ricalcolata la stima.",
+          "arrival_hold_minutes": "Con un sensore di arrivo: per quanto tempo «preriscalda ora» resta acceso dopo l'orario di arrivo previsto se era acceso e nessuno è ancora arrivato (un orario di arrivo statico ormai passato). 0 = spento all'orario di arrivo."
         }
       }
     }

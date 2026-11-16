@@ -40,12 +40,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ARRIVAL_MISSING_UPDATES,
+    CONF_ARRIVAL_HOLD_MINUTES,
     CONF_HALF_LIFE_DAYS,
     CONF_HISTORY_DAYS,
     CONF_TARGET_MODE,
     CONF_TARGET_TEMPERATURE,
     CONF_UPDATE_INTERVAL_MINUTES,
     CONF_ZONE_NAME,
+    DEFAULT_ARRIVAL_HOLD_MINUTES,
     DEFAULT_HALF_LIFE_DAYS,
     DEFAULT_HISTORY_DAYS,
     DEFAULT_TARGET_MODE,
@@ -119,6 +122,9 @@ class ZoneData:
     preheat_start: datetime | None = None
     coast_c: float | None = None  # temperature at arrival without heating
     latched: bool = False  # preheat_now held on (hysteresis)
+    arrival_at_latch: datetime | None = None  # arrival when preheat_now latched
+    hold_until: datetime | None = None  # latched: off at this time (arrival passed)
+    lead_minutes: float | None = None
     last_fit: datetime | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -135,18 +141,62 @@ class ZoneData:
     def preheat_now(self, now: datetime) -> bool | None:
         """On from the preheat start until the arrival; unknown without a start.
 
-        Once on it is held (``latched``) until the arrival, so it neither drops when the
-        room reaches the target early nor flickers while heating; the update releases the
-        latch only when the arrival passes, is cleared or moves later by more than
-        ``PREHEAT_HOLD_MINUTES``.
+        Once on it is held (``latched``), so it neither drops when the room reaches the
+        target early nor flickers while heating, nor on a single update without arrival.
+        After the arrival time it stays on until ``hold_until`` (``arrival_hold_minutes``,
+        nobody arrived yet). The coordinator releases the latch (see :class:`Latch`).
         """
+        if self.latched:
+            return self.hold_until is None or now < self.hold_until
         if self.arrival is None or self.arrival <= now:
             return False
-        if self.latched:
-            return True
         if self.preheat_start is None:
             return None
         return now >= self.preheat_start
+
+
+@dataclass
+class Latch:
+    """State of a latched ``preheat_now`` (persisted: it survives a restart).
+
+    Released when the arrival moves later than ``arrival_at_latch`` by more than
+    ``PREHEAT_HOLD_MINUTES`` (cumulative, so an estimate that keeps slipping cannot hold
+    it for hours), when the arrival is missing for more than ``ARRIVAL_MISSING_UPDATES``
+    updates before its time (someone arrived, the estimate was withdrawn), or
+    ``arrival_hold_minutes`` after the last known arrival time has passed.
+    """
+
+    arrival_at_latch: datetime
+    last_arrival: datetime
+    missing: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "arrival_at_latch": self.arrival_at_latch.isoformat(),
+            "last_arrival": self.last_arrival.isoformat(),
+            "missing": self.missing,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Latch | None:
+        if not isinstance(data, dict):
+            return None
+        at = _parse_dt(data.get("arrival_at_latch"))
+        last = _parse_dt(data.get("last_arrival")) or at
+        if at is None or last is None:
+            return None
+        return cls(at, last, int(data.get("missing") or 0))
+
+    def update(self, arrival: datetime | None, now: datetime, hold: timedelta) -> bool:
+        """Advance with the current arrival; False when the latch is released."""
+        if arrival is not None:
+            self.missing = 0
+            self.last_arrival = arrival
+            return arrival <= self.arrival_at_latch + timedelta(minutes=PREHEAT_HOLD_MINUTES)
+        if now < self.last_arrival:
+            self.missing += 1
+            return self.missing <= ARRIVAL_MISSING_UPDATES
+        return now < self.last_arrival + hold
 
 
 def parse_arrival(state: State | None, now: datetime) -> datetime | None:
@@ -192,6 +242,10 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             options.get(CONF_TARGET_TEMPERATURE, DEFAULT_TARGET_TEMPERATURE)
         )
         self.history_days: float = float(options.get(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS))
+        self.arrival_hold = timedelta(
+            minutes=float(options.get(CONF_ARRIVAL_HOLD_MINUTES, DEFAULT_ARRIVAL_HOLD_MINUTES))
+        )
+        self.latch: Latch | None = None
         self.model_config = ModelConfig(
             step_minutes=float(SAMPLE_INTERVAL_MINUTES),
             half_life_days=float(options.get(CONF_HALF_LIFE_DAYS, DEFAULT_HALF_LIFE_DAYS)),
@@ -265,6 +319,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         self.last_fit = _parse_dt(stored.get("last_fit"))
         self.bootstrapped = bool(stored.get("bootstrapped")) and self.snapshot is not None
         self.history_merged = int(stored.get("history_merged") or 0)
+        self.latch = Latch.from_dict(stored.get("latch")) if self.inputs.arrival_sensor else None
         if inputs_changed and self.snapshot is not None:
             # the data stays (and the recorder history of the new inputs is merged over
             # it below); only the parameters learnt from the old inputs are dropped
@@ -510,16 +565,35 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         else:
             status = STATUS_OK
         preheat_start = arrival - timedelta(minutes=lead) if arrival and lead is not None else None
-        # Held until the arrival whatever the lead does (it collapses once the room is at
-        # target); released only when the arrival passes, is cleared or is postponed.
+        # Latch: held whatever the lead does (it collapses once the room is at target);
+        # released only by the rules of :class:`Latch`.
+        latch_before = self.latch.to_dict() if self.latch else None
+        released = False
+        if self.latch is not None and not self.latch.update(arrival, now, self.arrival_hold):
+            self.latch = None
+            released = True
+        # on now by the new start, or by the previous one (the timer fired at the start and
+        # the recomputed start moved a little later, e.g. because the room cooled less)
         prev = self.data
-        latched = (
-            prev is not None
-            and prev.preheat_now(now) is True
-            and prev.arrival is not None
+        if (
+            self.latch is None
+            and not released
             and arrival is not None
-            and arrival <= prev.arrival + timedelta(minutes=PREHEAT_HOLD_MINUTES)
-        )
+            and arrival > now
+            and (
+                (preheat_start is not None and now >= preheat_start)
+                or (
+                    prev is not None
+                    and prev.arrival == arrival
+                    and prev.preheat_start is not None
+                    and now >= prev.preheat_start
+                )
+            )
+        ):
+            self.latch = Latch(arrival, arrival)
+        if (self.latch.to_dict() if self.latch else None) != latch_before:
+            self._schedule_save(now, force=True)
+        latch = self.latch
         forecast_used = estimate is not None and estimate.reason.get("outdoor_source") == "forecast"
         data = ZoneData(
             updated_at=now,
@@ -537,7 +611,10 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             arrival=arrival,
             preheat_start=preheat_start,
             coast_c=coast_c,
-            latched=latched,
+            latched=latch is not None,
+            arrival_at_latch=latch.arrival_at_latch if latch else None,
+            hold_until=latch.last_arrival + self.arrival_hold if latch else None,
+            lead_minutes=lead,
             last_fit=self.last_fit,
         )
         self._schedule_timers(data, now)
@@ -603,7 +680,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
     def _schedule_timers(self, data: ZoneData, now: datetime) -> None:
         """Refresh entities exactly at the preheat start and at the arrival."""
         self._cancel_timers()
-        for when in (data.preheat_start, data.arrival):
+        for when in (data.preheat_start, data.arrival, data.hold_until):
             if when is not None and when > now:
                 self._unsub_timers.append(
                     async_track_point_in_utc_time(self.hass, self._async_timer_fired, when)
@@ -612,6 +689,10 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
     @callback
     def _async_timer_fired(self, _now: datetime) -> None:
         self.async_update_listeners()
+        # latch the preheat start / release the hold without waiting for the poll
+        self.config_entry.async_create_background_task(
+            self.hass, self.async_request_refresh(), f"{DOMAIN}_timer_refresh"
+        )
 
     # ------------------------------------------------------------------ storage
 
@@ -632,8 +713,13 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         self._schedule_save(now)
 
     @callback
-    def _schedule_save(self, now: datetime) -> None:
+    def _schedule_save(self, now: datetime, force: bool = False) -> None:
         """Delayed save; not re-armed while one is pending (it writes the latest data)."""
+        if force:
+            # small state (the latch): write soon, the model snapshot is reused
+            self.storage.async_schedule_save(self._store_data, delay=10.0)
+            self._save_scheduled_at = now
+            return
         if (
             self._save_scheduled_at is not None
             and (now - self._save_scheduled_at).total_seconds() < SAVE_DELAY_SECONDS
@@ -650,6 +736,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             "bootstrapped": self.bootstrapped,
             "inputs": sorted(self.inputs.sample_entities),
             "history_merged": self.history_merged,
+            "latch": self.latch.to_dict() if self.latch else None,
         }
 
     # ------------------------------------------------------------------ actions

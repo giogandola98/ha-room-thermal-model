@@ -69,14 +69,16 @@
           "target_temperature": "Consigne fixe",
           "half_life_days": "Demi-vie de l'historique",
           "history_days": "Historique pour l'apprentissage",
-          "update_interval_minutes": "Intervalle de mise à jour"
+          "update_interval_minutes": "Intervalle de mise à jour",
+          "arrival_hold_minutes": "Maintien après l'heure d'arrivée"
         },
         "data_description": {
           "target_mode": "Utiliser une consigne fixe ou suivre la consigne du thermostat.",
           "target_temperature": "Consigne utilisée en mode fixe (également la valeur de repli si le thermostat n'a pas de consigne).",
           "half_life_days": "Les données plus anciennes pèsent moitié moins après ce nombre de jours (s'adapte aux saisons).",
           "history_days": "Jours d'historique du recorder chargés au premier démarrage et par l'action de réentraînement.",
-          "update_interval_minutes": "Fréquence de recalcul de l'estimation, en minutes."
+          "update_interval_minutes": "Fréquence de recalcul de l'estimation, en minutes.",
+          "arrival_hold_minutes": "Avec un capteur d'arrivée : durée pendant laquelle « préchauffer maintenant » reste activé après l'heure d'arrivée prévue s'il était activé et que personne n'est encore arrivé (heure d'arrivée statique déjà passée). 0 = désactivé à l'heure d'arrivée."
         }
       }
     }

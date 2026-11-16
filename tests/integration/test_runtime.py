@@ -239,10 +239,16 @@ async def test_preheat_start_and_now(
     await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(NOW_SENSOR).state == "on"
 
+    # Arrival time passed, nobody arrived: held for arrival_hold_minutes (30), then off.
     freezer.move_to(arrival + timedelta(seconds=5))
     async_fire_time_changed(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(NOW_SENSOR).state == "on"
+    freezer.move_to(arrival + timedelta(minutes=30, seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(NOW_SENSOR).state == "off"
+    assert not coordinator.data.latched
 
 
 async def test_arrival_soon_past_invalid(hass: HomeAssistant, fake_model: None) -> None:
@@ -256,10 +262,16 @@ async def test_arrival_soon_past_invalid(hass: HomeAssistant, fake_model: None) 
     coordinator = await _fitted(hass, entry)
     assert hass.states.get(NOW_SENSOR).state == "on"
 
+    # the estimate is withdrawn before its time (someone arrived): held for two
+    # updates without an arrival, released at the third
     hass.states.async_set(
         ARRIVAL, (now - timedelta(minutes=10)).isoformat(), {"device_class": "timestamp"}
     )
-    await coordinator.async_refresh()
+    await hass.async_block_till_done(wait_background_tasks=True)  # 1st update (event)
+    assert hass.states.get(NOW_SENSOR).state == "on"
+    await coordinator.async_refresh()  # 2nd
+    assert hass.states.get(NOW_SENSOR).state == "on"
+    await coordinator.async_refresh()  # 3rd: released
     assert hass.states.get(NOW_SENSOR).state == "off"
     assert hass.states.get(START).state == STATE_UNKNOWN
 
@@ -383,6 +395,10 @@ async def test_preheat_now_latch_holds_until_arrival_when_at_target_early(
     freezer.move_to(arrival + timedelta(seconds=5))
     async_fire_time_changed(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(NOW_SENSOR).state == "on"  # arrival_hold_minutes
+    freezer.move_to(arrival + timedelta(minutes=31))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(NOW_SENSOR).state == "off"
 
 
@@ -485,3 +501,84 @@ async def test_climate_max_temp_caps_max_reachable(hass: HomeAssistant, fake_mod
     hass.states.async_set(CLIMATE, "heat", climate_attrs())
     await coordinator.async_refresh()
     assert coordinator.model.preheat_calls[-1]["max_c"] is None
+
+
+async def _latched_zone(hass: HomeAssistant, freezer: FrozenDateTimeFactory, **options):
+    """Zone whose preheat_now just latched (arrival in 20 min, lead ~ 30 min)."""
+    set_inputs(hass)
+    arrival = dt_util.utcnow() + timedelta(minutes=20)
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    entry = await setup_entry(hass, make_entry(hass, arrival=True, **options))
+    coordinator = await _fitted(hass, entry)
+    assert hass.states.get(NOW_SENSOR).state == "on"
+    assert coordinator.data.latched
+    return entry, coordinator, arrival
+
+
+async def test_latch_released_when_arrival_keeps_slipping(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
+    """Arrival +25 min at every 5-min update: released within 30 min of total slip."""
+    entry, coordinator, arrival = await _latched_zone(hass, freezer)
+    latched_at = arrival
+    states = []
+    for _ in range(6):
+        freezer.tick(timedelta(minutes=5))
+        arrival += timedelta(minutes=25)
+        hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+        await hass.async_block_till_done(wait_background_tasks=True)
+        await coordinator.async_refresh()
+        states.append((arrival - latched_at, hass.states.get(NOW_SENSOR).state))
+    first_off = next(slip for slip, state in states if state == "off")
+    assert first_off <= timedelta(minutes=50)  # the update that took it beyond +30 min
+    assert all(state == "on" for slip, state in states if slip <= timedelta(minutes=30))
+    attrs = hass.states.get(NOW_SENSOR).attributes
+    assert attrs["latched"] is False and attrs["arrival_at_latch"] is None
+
+
+async def test_latch_survives_one_unknown_arrival(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
+    entry, coordinator, arrival = await _latched_zone(hass, freezer)
+    hass.states.async_set(ARRIVAL, STATE_UNKNOWN, {"device_class": "timestamp"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await coordinator.async_refresh()
+    assert hass.states.get(NOW_SENSOR).state == "on"
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(NOW_SENSOR).state == "on"
+    attrs = hass.states.get(NOW_SENSOR).attributes
+    assert attrs["arrival_at_latch"] == arrival.isoformat()
+    assert attrs["lead_minutes"] is not None
+
+
+async def test_latch_survives_a_restart(
+    hass: HomeAssistant,
+    fake_model: None,
+    freezer: FrozenDateTimeFactory,
+    hass_storage: dict,
+) -> None:
+    """Restart during the preheat: the latch is restored, preheat_now still on."""
+    entry, coordinator, arrival = await _latched_zone(hass, freezer)
+    # room at target: without the latch the start would be in the future (off)
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=21.0))
+    await coordinator.async_refresh()
+    assert hass.states.get(NOW_SENSOR).state == "on"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    stored = hass_storage[f"room_thermal_model.{entry.entry_id}"]["data"]
+    assert stored["latch"]["arrival_at_latch"] == arrival.isoformat()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data.data.latched
+    assert hass.states.get(NOW_SENSOR).state == "on"
+
+
+async def test_no_hold_after_arrival_when_option_is_zero(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
+    entry, coordinator, arrival = await _latched_zone(hass, freezer, arrival_hold_minutes=0)
+    freezer.move_to(arrival + timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(NOW_SENSOR).state == "off"

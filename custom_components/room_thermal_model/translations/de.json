@@ -69,14 +69,16 @@
           "target_temperature": "Festes Ziel",
           "half_life_days": "Halbwertszeit des Verlaufs",
           "history_days": "Verlauf zum Lernen",
-          "update_interval_minutes": "Aktualisierungsintervall"
+          "update_interval_minutes": "Aktualisierungsintervall",
+          "arrival_hold_minutes": "Halten nach der Ankunftszeit"
         },
         "data_description": {
           "target_mode": "Ein festes Ziel verwenden oder der Solltemperatur des Thermostats folgen.",
           "target_temperature": "Ziel im festen Modus (auch Rückfallwert, wenn das Thermostat keine Solltemperatur hat).",
           "half_life_days": "Ältere Daten zählen nach so vielen Tagen nur noch halb (passt sich den Jahreszeiten an).",
           "history_days": "Tage des Recorder-Verlaufs, die beim ersten Start und durch die Aktion Neu trainieren geladen werden.",
-          "update_interval_minutes": "Wie oft die Schätzung neu berechnet wird, in Minuten."
+          "update_interval_minutes": "Wie oft die Schätzung neu berechnet wird, in Minuten.",
+          "arrival_hold_minutes": "Mit Ankunftssensor: wie lange „Jetzt vorheizen“ nach der erwarteten Ankunftszeit eingeschaltet bleibt, wenn es an war und noch niemand angekommen ist (eine statische, bereits vergangene Ankunftszeit). 0 = aus zur Ankunftszeit."
         }
       }
     }
