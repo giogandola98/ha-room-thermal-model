@@ -48,6 +48,7 @@ from .const import (
     CONF_LEAD_QUANTILE,
     CONF_MAX_SENSOR_AGE_MINUTES,
     CONF_PREHEAT_PRESET,
+    CONF_TARGET_ENTITY,
     CONF_TARGET_MODE,
     CONF_TARGET_TEMPERATURE,
     CONF_UPDATE_INTERVAL_MINUTES,
@@ -82,6 +83,7 @@ from .const import (
     STATUS_UNRELIABLE,
     TARGET_MODE_CLIMATE,
     TARGET_MODE_CLIMATE_PRESET,
+    TARGET_MODE_ENTITY,
     UNREACHABLE_MARGIN_K,
 )
 from .forecast import WeatherForecast
@@ -93,6 +95,7 @@ from .inputs import (
     climate_max_temp,
     climate_preset_temperature,
     climate_target,
+    entity_celsius,
 )
 from .rtm_core import create_model
 from .rtm_core.base import (
@@ -264,6 +267,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         self.preheat_preset: str = str(
             options.get(CONF_PREHEAT_PRESET) or DEFAULT_PREHEAT_PRESET
         ).strip()
+        self.target_entity: str | None = options.get(CONF_TARGET_ENTITY) or None
         self.max_age = timedelta(
             minutes=float(options.get(CONF_MAX_SENSOR_AGE_MINUTES, DEFAULT_MAX_SENSOR_AGE_MINUTES))
         )
@@ -504,6 +508,10 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             )
             if target is not None:
                 return target, TARGET_MODE_CLIMATE_PRESET
+        if self.target_mode == TARGET_MODE_ENTITY and self.target_entity:
+            target = entity_celsius(self.hass.states.get(self.target_entity), self.system_unit)
+            if target is not None:
+                return target, TARGET_MODE_ENTITY
         return self.fixed_target, "fixed"
 
     @callback

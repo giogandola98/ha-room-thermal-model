@@ -191,6 +191,14 @@ def climate_preset_temperature(state: State | None, preset: str, system_unit: st
     return to_celsius(presets.get(f"{preset}_temp"), system_unit)
 
 
+def entity_celsius(state: State | None, system_unit: str) -> float | None:
+    """Numeric state of a target sensor / input_number in °C (its unit, else the system unit)."""
+    if not _valid(state):
+        return None
+    assert state is not None
+    return to_celsius(state.state, state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) or system_unit)
+
+
 def state_age(state: State | None, ts: datetime) -> timedelta | None:
     """Time since the state was last reported (an unchanged value counts as a report)."""
     if state is None:

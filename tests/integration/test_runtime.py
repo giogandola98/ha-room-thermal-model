@@ -613,6 +613,27 @@ async def test_climate_preset_target(hass: HomeAssistant, fake_model: None) -> N
     assert coordinator.data.target_c == 20.5
 
 
+async def test_entity_target(hass: HomeAssistant, fake_model: None) -> None:
+    """Target from a sensor (e.g. the schedule's temperature at arrival), fixed fallback."""
+    set_inputs(hass)
+    hass.states.async_set(
+        CLIMATE,
+        "heat",
+        climate_attrs(current=17.0, target=15.0, preset_temperatures=VTHERM_PRESETS),
+    )
+    hass.states.async_set("sensor.zone_target", "19.5", {"unit_of_measurement": "°C"})
+    entry = await setup_entry(
+        hass, make_entry(hass, target_mode="entity", target_entity="sensor.zone_target")
+    )
+    coordinator = await _fitted(hass, entry)
+    assert coordinator.data.target_source == "entity"
+    assert coordinator.data.target_c == 19.5
+    hass.states.async_set("sensor.zone_target", "unavailable")
+    await coordinator.async_refresh()
+    assert coordinator.data.target_source == "fixed"
+    assert coordinator.data.target_c == 20.5
+
+
 async def test_setback_floor_limits_cooling_before_preheat(
     hass: HomeAssistant, fake_model: None
 ) -> None:

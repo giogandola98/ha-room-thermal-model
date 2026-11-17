@@ -15,7 +15,8 @@
           "arrival_sensor": "Ankunftszeitsensor",
           "target_mode": "Zieltemperatur",
           "target_temperature": "Festes Ziel",
-          "preheat_preset": "Vorheiz-Preset"
+          "preheat_preset": "Vorheiz-Preset",
+          "target_entity": "Zielsensor"
         },
         "data_description": {
           "zone_name": "Name der Zone (Raum oder Heizzone); wird auch für die Entitäts-IDs verwendet.",
@@ -28,7 +29,8 @@
           "arrival_sensor": "Optional. Zeitstempelsensor mit der erwarteten Ankunft (z. B. sensor.house_next_return_eta von Home Return Predictor): aktiviert die Entitäten Vorheizbeginn und Jetzt vorheizen.",
           "target_mode": "Ein festes Ziel verwenden oder der Solltemperatur des Thermostats folgen.",
           "target_temperature": "Ziel im festen Modus (auch Rückfallwert, wenn das Thermostat keine Solltemperatur hat).",
-          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet."
+          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet.",
+          "target_entity": "Im Modus Sensor-Ziel: numerischer Sensor oder input_number (°C), dessen Wert das Vorheizziel ist, z. B. ein Template mit der Zeitplan-Temperatur zur erwarteten Ankunft. Solange er nicht verfügbar ist, gilt das feste Ziel."
         }
       },
       "reconfigure": {
@@ -75,7 +77,8 @@
           "arrival_hold_minutes": "Halten nach der Ankunftszeit",
           "preheat_preset": "Vorheiz-Preset",
           "max_sensor_age_minutes": "Maximales Sensoralter",
-          "lead_quantile": "Vorheiz-Quantil"
+          "lead_quantile": "Vorheiz-Quantil",
+          "target_entity": "Zielsensor"
         },
         "data_description": {
           "target_mode": "Ein festes Ziel verwenden oder der Solltemperatur des Thermostats folgen.",
@@ -86,7 +89,8 @@
           "arrival_hold_minutes": "Mit Ankunftssensor: wie lange „Jetzt vorheizen“ nach der erwarteten Ankunftszeit eingeschaltet bleibt, wenn es an war und noch niemand angekommen ist (eine statische, bereits vergangene Ankunftszeit). 0 = aus zur Ankunftszeit.",
           "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet.",
           "max_sensor_age_minutes": "Die Innentemperatur gilt als fehlend, wenn ihr Sensor so lange nichts gemeldet hat (defekter Sensor oder leere Batterie); die Zone meldet dann no_temperature.",
-          "lead_quantile": "Wie vorsichtig der Vorheizbeginn ist: verwendet die Aufheizzeit, die reale Aufheizvorgänge der Zone so oft eingehalten haben (0,8 = etwa 4 von 5 Mal rechtzeitig; 0,5 = zentrale Schätzung)."
+          "lead_quantile": "Wie vorsichtig der Vorheizbeginn ist: verwendet die Aufheizzeit, die reale Aufheizvorgänge der Zone so oft eingehalten haben (0,8 = etwa 4 von 5 Mal rechtzeitig; 0,5 = zentrale Schätzung).",
+          "target_entity": "Im Modus Sensor-Ziel: numerischer Sensor oder input_number (°C), dessen Wert das Vorheizziel ist, z. B. ein Template mit der Zeitplan-Temperatur zur erwarteten Ankunft. Solange er nicht verfügbar ist, gilt das feste Ziel."
         }
       }
     }
@@ -96,7 +100,8 @@
       "options": {
         "fixed": "Fester Wert",
         "climate": "Dem Thermostatziel folgen",
-        "climate_preset": "Preset-Temperatur des Thermostats (z. B. Komfort von Versatile Thermostat)"
+        "climate_preset": "Preset-Temperatur des Thermostats (z. B. Komfort von Versatile Thermostat)",
+        "entity": "Wert eines Sensors (z. B. Zeitplan-Temperatur bei Ankunft)"
       }
     }
   },
