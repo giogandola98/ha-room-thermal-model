@@ -26,7 +26,13 @@ Rules:
   learning input; the model reads it to tell when a thermostatic valve is throttling (the
   room sits just below its current setpoint) rather than heating at full power;
 * a sample is ``excluded`` from learning while the climate is unavailable/unknown or
-  actively cooling (the model only describes heating).
+  actively cooling (the model only describes heating);
+* a dead temperature sensor keeps its last state forever: the indoor value is missing
+  when the state providing it was last *reported* (``State.last_reported``, also updated
+  by reports of an unchanged value) more than ``max_age`` ago;
+* ``preset_temperatures`` (Versatile Thermostat): ``climate_preset_temperature`` reads
+  ``preset_temperatures["<preset>_temp"]``, the comfort temperature a preheat aims at
+  while the current setpoint is a setback.
 
 All temperatures are converted to °C.
 """
@@ -35,7 +41,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -171,6 +177,28 @@ def climate_target(state: State | None, system_unit: str) -> float | None:
     return to_celsius(state.attributes.get(ATTR_TEMPERATURE), system_unit)
 
 
+ATTR_PRESET_TEMPERATURES = "preset_temperatures"
+
+
+def climate_preset_temperature(state: State | None, preset: str, system_unit: str) -> float | None:
+    """``preset_temperatures["<preset>_temp"]`` of a climate in °C (None when absent)."""
+    if not _valid(state):
+        return None
+    assert state is not None
+    presets = state.attributes.get(ATTR_PRESET_TEMPERATURES)
+    if not isinstance(presets, dict):
+        return None
+    return to_celsius(presets.get(f"{preset}_temp"), system_unit)
+
+
+def state_age(state: State | None, ts: datetime) -> timedelta | None:
+    """Time since the state was last reported (an unchanged value counts as a report)."""
+    if state is None:
+        return None
+    reported = getattr(state, "last_reported", None) or state.last_updated
+    return max(timedelta(0), ts - reported)
+
+
 def climate_max_temp(state: State | None, system_unit: str) -> float | None:
     """Maximum setpoint (``max_temp``) of a climate in °C."""
     if not _valid(state):
@@ -235,12 +263,22 @@ def climate_cooling(state: State | None) -> bool:
 
 
 def indoor_temperature(
-    inputs: ZoneInputs, states: dict[str, State | None], system_unit: str
+    inputs: ZoneInputs,
+    states: dict[str, State | None],
+    system_unit: str,
+    ts: datetime | None = None,
+    max_age: timedelta | None = None,
 ) -> float | None:
-    """Indoor temperature in °C."""
+    """Indoor temperature in °C (None when its state is older than ``max_age`` at ``ts``)."""
+    entity = inputs.room_sensor or inputs.climate
+    state = states.get(entity)
+    if ts is not None and max_age is not None:
+        age = state_age(state, ts)
+        if age is not None and age > max_age:
+            return None
     if inputs.room_sensor:
-        return sensor_celsius(states.get(inputs.room_sensor))
-    return climate_current(states.get(inputs.climate), system_unit)
+        return sensor_celsius(state)
+    return climate_current(state, system_unit)
 
 
 def outdoor_temperature(
@@ -291,13 +329,17 @@ def _room_effort(
 
 
 def build_sample(
-    inputs: ZoneInputs, states: dict[str, State | None], ts: datetime, system_unit: str
+    inputs: ZoneInputs,
+    states: dict[str, State | None],
+    ts: datetime,
+    system_unit: str,
+    max_age: timedelta | None = None,
 ) -> Sample:
     """Build one model sample from the current states of the zone's inputs."""
     climate = states.get(inputs.climate)
     return Sample(
         ts=ts,
-        indoor_c=indoor_temperature(inputs, states, system_unit),
+        indoor_c=indoor_temperature(inputs, states, system_unit, ts, max_age),
         outdoor_c=outdoor_temperature(inputs, states, system_unit),
         effort=heating_effort(inputs, states, system_unit),
         excluded=not _valid(climate) or climate_cooling(climate),

@@ -30,6 +30,7 @@ from homeassistant.core import (
     State,
     callback,
 )
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_point_in_utc_time,
@@ -44,6 +45,8 @@ from .const import (
     CONF_ARRIVAL_HOLD_MINUTES,
     CONF_HALF_LIFE_DAYS,
     CONF_HISTORY_DAYS,
+    CONF_MAX_SENSOR_AGE_MINUTES,
+    CONF_PREHEAT_PRESET,
     CONF_TARGET_MODE,
     CONF_TARGET_TEMPERATURE,
     CONF_UPDATE_INTERVAL_MINUTES,
@@ -51,11 +54,15 @@ from .const import (
     DEFAULT_ARRIVAL_HOLD_MINUTES,
     DEFAULT_HALF_LIFE_DAYS,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_MAX_SENSOR_AGE_MINUTES,
+    DEFAULT_PREHEAT_PRESET,
     DEFAULT_TARGET_MODE,
     DEFAULT_TARGET_TEMPERATURE,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
     HISTORY_MERGE_VERSION,
+    ISSUE_AFTER_HOURS,
+    ISSUE_SETPOINT_BELOW_CURRENT,
     LEAD_MAX_ITERATIONS,
     LEAD_TOLERANCE_MINUTES,
     PREHEAT_HOLD_MINUTES,
@@ -72,6 +79,7 @@ from .const import (
     STATUS_UNREACHABLE,
     STATUS_UNRELIABLE,
     TARGET_MODE_CLIMATE,
+    TARGET_MODE_CLIMATE_PRESET,
     UNREACHABLE_MARGIN_K,
 )
 from .forecast import WeatherForecast
@@ -81,6 +89,7 @@ from .inputs import (
     ZoneInputs,
     build_sample,
     climate_max_temp,
+    climate_preset_temperature,
     climate_target,
 )
 from .rtm_core import create_model
@@ -93,6 +102,7 @@ from .rtm_core.base import (
     ThermalModel,
     ThermalParameters,
 )
+from .rtm_core.lead import lead_minutes
 from .storage import STORAGE_SCHEMA, RTMStorage, StoredData
 
 _LOGGER = logging.getLogger(__name__)
@@ -121,6 +131,7 @@ class ZoneData:
     arrival: datetime | None = None  # valid future arrival only
     preheat_start: datetime | None = None
     coast_c: float | None = None  # temperature at arrival without heating
+    floor_c: float | None = None  # setback setpoint the room does not coast below
     latched: bool = False  # preheat_now held on (hysteresis)
     arrival_at_latch: datetime | None = None  # arrival when preheat_now latched
     hold_until: datetime | None = None  # latched: off at this time (arrival passed)
@@ -246,6 +257,13 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             minutes=float(options.get(CONF_ARRIVAL_HOLD_MINUTES, DEFAULT_ARRIVAL_HOLD_MINUTES))
         )
         self.latch: Latch | None = None
+        self.preheat_preset: str = str(
+            options.get(CONF_PREHEAT_PRESET) or DEFAULT_PREHEAT_PRESET
+        ).strip()
+        self.max_age = timedelta(
+            minutes=float(options.get(CONF_MAX_SENSOR_AGE_MINUTES, DEFAULT_MAX_SENSOR_AGE_MINUTES))
+        )
+        self._below_since: datetime | None = None  # setpoint_below_current with arrival
         self.model_config = ModelConfig(
             step_minutes=float(SAMPLE_INTERVAL_MINUTES),
             half_life_days=float(options.get(CONF_HALF_LIFE_DAYS, DEFAULT_HALF_LIFE_DAYS)),
@@ -289,7 +307,9 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
 
     def current_sample(self, ts: datetime | None = None) -> Sample:
         """Sample built from the current states of the inputs."""
-        return build_sample(self.inputs, self._states(), ts or dt_util.utcnow(), self.system_unit)
+        return build_sample(
+            self.inputs, self._states(), ts or dt_util.utcnow(), self.system_unit, self.max_age
+        )
 
     async def _async_model_job(self, func: Any, *args: Any) -> Any:
         """Run one CPU-bound model call in the executor under the lock."""
@@ -473,7 +493,39 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             target = climate_target(self.hass.states.get(self.inputs.climate), self.system_unit)
             if target is not None:
                 return target, TARGET_MODE_CLIMATE
+        if self.target_mode == TARGET_MODE_CLIMATE_PRESET:
+            target = climate_preset_temperature(
+                self.hass.states.get(self.inputs.climate), self.preheat_preset, self.system_unit
+            )
+            if target is not None:
+                return target, TARGET_MODE_CLIMATE_PRESET
         return self.fixed_target, "fixed"
+
+    @callback
+    def _update_setpoint_issue(self, status: str, now: datetime) -> None:
+        """Repair issue: following a setback setpoint never asks for a preheat."""
+        issue_id = f"{ISSUE_SETPOINT_BELOW_CURRENT}_{self.config_entry.entry_id}"
+        if (
+            self.target_mode == TARGET_MODE_CLIMATE
+            and self.inputs.arrival_sensor
+            and status == STATUS_SETPOINT_BELOW_CURRENT
+        ):
+            if self._below_since is None:
+                self._below_since = now
+            if now - self._below_since >= timedelta(hours=ISSUE_AFTER_HOURS):
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key=ISSUE_SETPOINT_BELOW_CURRENT,
+                    translation_placeholders={"zone": self.zone_name},
+                )
+            return
+        if status != STATUS_SETPOINT_BELOW_CURRENT or self.target_mode != TARGET_MODE_CLIMATE:
+            self._below_since = None
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     async def _async_get_forecast(self, now: datetime) -> list[ForecastPoint]:
         if self.forecast is None:
@@ -522,8 +574,19 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         arrival = parse_arrival(arrival_state, now)
         indoor = current.indoor_c
         outdoor = current.outdoor_c
+        climate_state = self.hass.states.get(self.inputs.climate)
         # the climate's max setpoint caps the maximum reachable temperature
-        max_c = climate_max_temp(self.hass.states.get(self.inputs.climate), self.system_unit)
+        max_c = climate_max_temp(climate_state, self.system_unit)
+        # a setback setpoint below the room: the thermostat holds it, the room does not
+        # coast below it before the preheat
+        setpoint = climate_target(climate_state, self.system_unit)
+        # (an HVAC mode "off" holds nothing, whatever its temperature attribute says)
+        holding = climate_state is not None and climate_state.state not in ("off", *INVALID_STATES)
+        floor_c = (
+            setpoint
+            if holding and setpoint is not None and indoor is not None and setpoint < indoor
+            else None
+        )
         estimate: PreheatEstimate | None = None
         coast_c: float | None = None
         lead: float | None = None
@@ -535,9 +598,23 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
                     estimate = self.model.preheat(now, indoor, target_c, outdoor, forecast, max_c)
                     if arrival is not None:
                         minutes = (arrival - now).total_seconds() / 60.0
-                        coast_c = self.model.coast(now, indoor, minutes, outdoor, forecast)
-                        lead = self._lead_minutes(
-                            now, indoor, target_c, outdoor, forecast, estimate, minutes, max_c
+                        coast_c = self.model.coast(
+                            now, indoor, minutes, outdoor, forecast, floor_c=floor_c
+                        )
+                        lead = lead_minutes(
+                            self.model,
+                            now,
+                            indoor,
+                            target_c,
+                            outdoor,
+                            forecast,
+                            estimate,
+                            minutes,
+                            max_c,
+                            floor_c=floor_c,
+                            margin_k=UNREACHABLE_MARGIN_K,
+                            max_iterations=LEAD_MAX_ITERATIONS,
+                            tolerance_minutes=LEAD_TOLERANCE_MINUTES,
                         )
         except MODEL_ERRORS as err:
             raise UpdateFailed(
@@ -611,6 +688,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             arrival=arrival,
             preheat_start=preheat_start,
             coast_c=coast_c,
+            floor_c=floor_c,
             latched=latch is not None,
             arrival_at_latch=latch.arrival_at_latch if latch else None,
             hold_until=latch.last_arrival + self.arrival_hold if latch else None,
@@ -618,63 +696,9 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             last_fit=self.last_fit,
         )
         self._schedule_timers(data, now)
+        self._update_setpoint_issue(status, now)
         await self._async_snapshot(force=fitted)
         return data
-
-    def _lead_minutes(
-        self,
-        now: datetime,
-        indoor: float,
-        target_c: float,
-        outdoor: float | None,
-        forecast: list[ForecastPoint],
-        estimate: PreheatEstimate,
-        total: float,
-        max_c: float | None = None,
-    ) -> float | None:
-        """Minutes before the arrival at which heating must start (model lock held).
-
-        The room cools until the heating starts, so the duration is iterated to a fixed
-        point: lead -> start temperature after ``total - lead`` minutes of coasting ->
-        new duration. An unreachable target is replaced by the maximum reachable
-        temperature minus a margin (the sensors stay unreachable; only the start moves).
-        Returns None when no lead can be determined.
-        """
-        goal = target_c
-        if estimate.minutes is None:
-            if (
-                estimate.reachable
-                or estimate.reason.get("status") in ("no_outdoor", "unreliable")
-                or estimate.max_reachable_c is None
-            ):
-                return None
-            goal = estimate.max_reachable_c - UNREACHABLE_MARGIN_K
-            # already near the maximum: lead 0, the loop still accounts for the cooling
-            estimate = self.model.preheat(now, indoor, goal, outdoor, forecast, max_c)
-            if estimate.minutes is None:
-                return total
-        lead = max(0.0, estimate.minutes)
-        # From a future start the forecast describes the outdoor temperature; the value
-        # measured now would wrongly anchor the curve there. Without a forecast the
-        # current reading is the best guess.
-        future_outdoor = None if any(p.outdoor_c is not None for p in forecast) else outdoor
-        for _ in range(LEAD_MAX_ITERATIONS):
-            wait = total - lead
-            if wait <= 0:
-                break
-            start_c = self.model.coast(now, indoor, wait, outdoor, forecast)
-            if start_c is None:
-                break
-            nxt = self.model.preheat(
-                now + timedelta(minutes=wait), start_c, goal, future_outdoor, forecast, max_c
-            ).minutes
-            if nxt is None:
-                break
-            if abs(nxt - lead) < LEAD_TOLERANCE_MINUTES:
-                lead = nxt
-                break
-            lead = nxt
-        return lead
 
     @callback
     def _schedule_timers(self, data: ZoneData, now: datetime) -> None:
@@ -750,7 +774,9 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         """
         async with self._retrain_lock:
             try:
-                samples = await async_load_zone_history(self.hass, self.inputs, self.history_days)
+                samples = await async_load_zone_history(
+                    self.hass, self.inputs, self.history_days, self.max_age
+                )
                 _LOGGER.debug("History for %s: %d samples", self.zone_name, len(samples))
                 if samples:
                     try:

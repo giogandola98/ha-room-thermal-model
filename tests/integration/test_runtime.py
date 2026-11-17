@@ -582,3 +582,133 @@ async def test_no_hold_after_arrival_when_option_is_zero(
     async_fire_time_changed(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(NOW_SENSOR).state == "off"
+
+
+VTHERM_PRESETS = {"frost_temp": 15.0, "eco_temp": 18.0, "comfort_temp": 20.0, "boost_temp": 21.0}
+
+
+async def test_climate_preset_target(hass: HomeAssistant, fake_model: None) -> None:
+    """VTherm in eco 18 with comfort 20: target 20, status ok (not setpoint_below)."""
+    set_inputs(hass)
+    hass.states.async_set(
+        CLIMATE,
+        "heat",
+        climate_attrs(
+            current=19.0, target=18.0, preset_mode="eco", preset_temperatures=VTHERM_PRESETS
+        ),
+    )
+    entry = await setup_entry(hass, make_entry(hass, target_mode="climate_preset"))
+    coordinator = await _fitted(hass, entry)
+    assert coordinator.data.target_c == 20.0
+    assert coordinator.data.target_source == "climate_preset"
+    assert coordinator.data.status == "ok"
+    # a preset the thermostat does not expose: fixed target fallback
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "preheat_preset": "away"}
+    )
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    coordinator = await _fitted(hass, entry)
+    assert coordinator.data.target_source == "fixed"
+    assert coordinator.data.target_c == 20.5
+
+
+async def test_setback_floor_limits_cooling_before_preheat(
+    hass: HomeAssistant, fake_model: None
+) -> None:
+    """Arrival in 24 h, setpoint 18 below the room: the start is computed from 18 °C."""
+    set_inputs(hass)
+    hass.states.async_set(
+        CLIMATE,
+        "heat",
+        climate_attrs(current=20.0, target=18.0, preset_temperatures=VTHERM_PRESETS),
+    )
+    arrival = dt_util.utcnow() + timedelta(hours=24)
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    entry = await setup_entry(hass, make_entry(hass, arrival=True, target_mode="climate_preset"))
+    coordinator = await _fitted(hass, entry)
+    model: FakeModel = coordinator.model
+    # fake model: heating 3 K/h; from the 18 °C floor to 20 °C = 40 min
+    assert coordinator.data.lead_minutes == pytest.approx(40.0, abs=1.0)
+    assert model.preheat_calls[-1]["start"] == pytest.approx(18.0)
+    assert coordinator.data.floor_c == 18.0
+    assert hass.states.get(f"sensor.{SLUG}_arrival_temperature").state == "18.0"
+    # HVAC off holds nothing: the room coasts freely (1 K/h in the fake model)
+    hass.states.async_set(
+        CLIMATE,
+        "off",
+        climate_attrs(current=20.0, target=18.0, preset_temperatures=VTHERM_PRESETS),
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await coordinator.async_refresh()
+    assert coordinator.data.floor_c is None
+    assert coordinator.data.lead_minutes > 60
+
+
+async def test_stale_room_sensor_is_no_temperature(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
+    """A sensor that has not reported for 7 h (> 360 min) gives no indoor temperature."""
+    set_inputs(hass)
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=19.0))
+    entry = await setup_entry(hass, make_entry(hass))
+    coordinator = await _fitted(hass, entry)
+    assert coordinator.data.status != "no_temperature"
+    freezer.tick(timedelta(hours=7))
+    await coordinator.async_refresh()
+    assert coordinator.data.status == "no_temperature"
+    assert coordinator.data.indoor_c is None
+    # a report of the same value (last_reported moves) makes it valid again
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=19.0), force_update=False)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await coordinator.async_refresh()
+    assert coordinator.data.indoor_c == 19.0
+
+
+async def test_setpoint_below_current_repair_issue(
+    hass: HomeAssistant, fake_model: None, freezer: FrozenDateTimeFactory
+) -> None:
+    """climate mode + arrival, setpoint below the room for 24 h: repair issue raised."""
+    from homeassistant.helpers import issue_registry as ir
+
+    set_inputs(hass)
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=20.0, target=15.0))
+    hass.states.async_set(
+        ARRIVAL,
+        (dt_util.utcnow() + timedelta(hours=30)).isoformat(),
+        {"device_class": "timestamp"},
+    )
+    entry = await setup_entry(hass, make_entry(hass, arrival=True, target_mode="climate"))
+    coordinator = await _fitted(hass, entry)
+    assert coordinator.data.status == "setpoint_below_current"
+    issue_id = f"setpoint_below_current_{entry.entry_id}"
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue("room_thermal_model", issue_id) is None
+    for _ in range(5):
+        freezer.tick(timedelta(hours=6))
+        hass.states.async_set(CLIMATE, "heat", climate_attrs(current=20.0, target=15.0, n=_))
+        await hass.async_block_till_done(wait_background_tasks=True)
+        await coordinator.async_refresh()
+    assert registry.async_get_issue("room_thermal_model", issue_id) is not None
+    hass.states.async_set(CLIMATE, "heat", climate_attrs(current=19.0, target=21.0))
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await coordinator.async_refresh()
+    assert registry.async_get_issue("room_thermal_model", issue_id) is None
+
+
+async def test_parameter_sensors_unknown_when_unreliable(
+    hass: HomeAssistant, fake_model: None
+) -> None:
+    set_inputs(hass)
+    entry = await setup_entry(hass, make_entry(hass))
+    coordinator = await _fitted(hass, entry)
+    tau = f"sensor.{SLUG}_time_constant"
+    assert hass.states.get(tau).state == "8.0"
+    from custom_components.room_thermal_model.rtm_core.base import ThermalParameters
+
+    coordinator.model.params = ThermalParameters(3.0, 0.125, 0.0, 30.0, reliable=False)
+    await coordinator.async_refresh()
+    state = hass.states.get(tau)
+    assert state.state == STATE_UNKNOWN
+    assert state.attributes["reliable"] is False
+    assert state.attributes["raw_value"] == 8.0

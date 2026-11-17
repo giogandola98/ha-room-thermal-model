@@ -255,3 +255,50 @@ def test_history_does_not_fill_downtime() -> None:
     ]
     assert downtime and all(v is None for v in downtime)
     assert all(e is None for k, e in enumerate(grid.effort) if grid.indoor[k] is None)
+
+
+def test_stale_indoor_sensor_is_missing_live_and_in_history() -> None:
+    """A room sensor not reported for longer than max_age gives no indoor value."""
+    room = ZoneInputs(climate=CLIMATE, room_sensor=ROOM)
+    age = timedelta(minutes=360)
+
+    def dead(ts: datetime) -> State:  # recorder rows: last_reported = last report
+        return State(
+            ROOM,
+            "19.5",
+            {"unit_of_measurement": C},
+            last_changed=ts,
+            last_reported=ts,
+            last_updated=ts,
+        )
+
+    sensor = dead(T0)
+    states = {CLIMATE: _climate(current=19.0), ROOM: sensor}
+    fresh = build_sample(room, states, T0 + timedelta(hours=5), C, age)
+    stale = build_sample(room, states, T0 + timedelta(hours=7), C, age)
+    assert fresh.indoor_c == 19.5 and stale.indoor_c is None
+    assert build_sample(room, states, T0 + timedelta(hours=7), C).indoor_c == 19.5  # no limit
+    # an unchanged value reported later (last_reported) keeps it valid
+    reported = State(
+        ROOM,
+        "19.5",
+        {"unit_of_measurement": C},
+        last_updated=T0,
+        last_changed=T0,
+        last_reported=T0 + timedelta(hours=4),
+    )
+    states[ROOM] = reported
+    assert build_sample(room, states, T0 + timedelta(hours=7), C, age).indoor_c == 19.5
+
+    # history: the climate keeps reporting every 30 min, the room sensor died at T0
+    rows = {
+        ROOM: [dead(T0)],
+        CLIMATE: [
+            _climate_at(T0 + timedelta(minutes=30 * i), current=19.0, action="idle")
+            for i in range(20)
+        ],
+    }
+    samples = reduce_states(room, C, [rows], T0 + timedelta(hours=10), max_age=age)
+    assert all(s.indoor_c == 19.5 for s in samples if s.ts <= T0 + timedelta(hours=6))
+    late = [s for s in samples if s.ts > T0 + timedelta(hours=6, minutes=1)]
+    assert late and all(s.indoor_c is None for s in late)

@@ -214,8 +214,10 @@ class FakeModel(ThermalModel):
         minutes: float,
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
+        floor_c: float | None = None,
     ) -> float | None:
-        return start_c - minutes / 60
+        temp = start_c - minutes / 60
+        return max(temp, floor_c) if floor_c is not None and floor_c < start_c else temp
 
     def quality(self) -> QualityReport:
         return QualityReport(

@@ -10,6 +10,8 @@ so raw state rows never pile up:
   attribute reconstructed as ``Sample.setpoint_c`` — it changes in steps and is carried
   forward with the same anti-downtime limit as the other signals;
 * changes closer than ``HISTORY_MIN_SPACING_S`` are coalesced (last one wins);
+* per entity, the indoor value is missing once the state providing it was last reported
+  more than ``max_age`` before the replayed instant (a dead sensor), as live;
 * between changes the last known states are carried forward on a
   ``SAMPLE_INTERVAL_MINUTES`` grid (recorder rows only store changes; the state holds
   until the next row), like the live grid sampling does, but at most
@@ -43,9 +45,12 @@ _LOGGER = logging.getLogger(__name__)
 class HistoryReducer:
     """Incrementally turn chronological state rows into samples."""
 
-    def __init__(self, inputs: ZoneInputs, system_unit: str) -> None:
+    def __init__(
+        self, inputs: ZoneInputs, system_unit: str, max_age: timedelta | None = None
+    ) -> None:
         self.inputs = inputs
         self.system_unit = system_unit
+        self.max_age = max_age
         self.samples: list[Sample] = []
         self._current: dict[str, State | None] = dict.fromkeys(inputs.sample_entities)
         self._last_ts: datetime | None = None
@@ -55,7 +60,7 @@ class HistoryReducer:
         self._spacing = timedelta(seconds=HISTORY_MIN_SPACING_S)
 
     def _emit(self, ts: datetime) -> None:
-        sample = build_sample(self.inputs, self._current, ts, self.system_unit)
+        sample = build_sample(self.inputs, self._current, ts, self.system_unit, self.max_age)
         if self.samples and self._last_ts is not None and ts - self._last_ts < self._spacing:
             # Coalesce bursts: keep the timestamp of the first change, latest values.
             first = self.samples[-1]
@@ -114,10 +119,14 @@ class HistoryReducer:
 
 
 def reduce_states(
-    inputs: ZoneInputs, system_unit: str, windows: Iterable[dict[str, list[State]]], end: datetime
+    inputs: ZoneInputs,
+    system_unit: str,
+    windows: Iterable[dict[str, list[State]]],
+    end: datetime,
+    max_age: timedelta | None = None,
 ) -> list[Sample]:
     """Reduce chronological windows of state rows (pure helper, used by tests)."""
-    reducer = HistoryReducer(inputs, system_unit)
+    reducer = HistoryReducer(inputs, system_unit, max_age)
     for rows in windows:
         reducer.feed(rows)
     return reducer.finish(end)
@@ -151,9 +160,10 @@ def _load_chunked(
     system_unit: str,
     start: datetime,
     end: datetime,
+    max_age: timedelta | None = None,
 ) -> list[Sample]:
     """Query the recorder window by window and reduce each one (recorder executor)."""
-    reducer = HistoryReducer(inputs, system_unit)
+    reducer = HistoryReducer(inputs, system_unit, max_age)
     window = timedelta(days=HISTORY_CHUNK_DAYS)
     entity_ids = inputs.sample_entities
     chunk_start = start
@@ -165,7 +175,7 @@ def _load_chunked(
 
 
 async def async_load_zone_history(
-    hass: HomeAssistant, inputs: ZoneInputs, days: float
+    hass: HomeAssistant, inputs: ZoneInputs, days: float, max_age: timedelta | None = None
 ) -> list[Sample]:
     """Load ``days`` of history as samples (empty when the recorder is unavailable)."""
     if "recorder" not in hass.config.components:
@@ -179,7 +189,7 @@ async def async_load_zone_history(
     system_unit = hass.config.units.temperature_unit
     try:
         return await get_instance(hass).async_add_executor_job(
-            _load_chunked, hass, inputs, system_unit, start, end
+            _load_chunked, hass, inputs, system_unit, start, end, max_age
         )
     except (HomeAssistantError, SQLAlchemyError, KeyError, ValueError) as err:
         _LOGGER.warning("Could not read history for %s: %s", inputs.climate, err)

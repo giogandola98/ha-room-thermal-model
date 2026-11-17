@@ -83,6 +83,7 @@ async def test_entity_ids_without_arrival(hass: HomeAssistant, fake_model: None)
     assert device.entry_type is dr.DeviceEntryType.SERVICE
     assert hass.states.get(f"sensor.{SLUG}_preheat_start") is None
     assert hass.states.get(f"binary_sensor.{SLUG}_preheat_now") is None
+    assert hass.states.get(f"sensor.{SLUG}_arrival_temperature") is None
 
 
 async def test_entity_ids_with_arrival(hass: HomeAssistant, fake_model: None) -> None:
@@ -99,6 +100,9 @@ async def test_entity_ids_with_arrival(hass: HomeAssistant, fake_model: None) ->
     )
     assert hass.states.get(f"binary_sensor.{SLUG}_preheat_now").state == "off"
     assert hass.states.get(f"sensor.{SLUG}_preheat_start").state == STATE_UNKNOWN
+    assert registry.async_get(f"sensor.{SLUG}_arrival_temperature").unique_id == (
+        f"{entry.entry_id}_arrival_temperature"
+    )
 
 
 async def test_two_zones(hass: HomeAssistant, fake_model: None) -> None:

@@ -14,7 +14,8 @@
           "weather_entity": "Wetter-Entität",
           "arrival_sensor": "Ankunftszeitsensor",
           "target_mode": "Zieltemperatur",
-          "target_temperature": "Festes Ziel"
+          "target_temperature": "Festes Ziel",
+          "preheat_preset": "Vorheiz-Preset"
         },
         "data_description": {
           "zone_name": "Name der Zone (Raum oder Heizzone); wird auch für die Entitäts-IDs verwendet.",
@@ -26,7 +27,8 @@
           "weather_entity": "Optional. Vorhersage für das Vorheizfenster (stündlich, sonst zweimal täglich, sonst täglich) und Außentemperatur, wenn kein Außensensor gesetzt ist.",
           "arrival_sensor": "Optional. Zeitstempelsensor mit der erwarteten Ankunft (z. B. sensor.house_next_return_eta von Home Return Predictor): aktiviert die Entitäten Vorheizbeginn und Jetzt vorheizen.",
           "target_mode": "Ein festes Ziel verwenden oder der Solltemperatur des Thermostats folgen.",
-          "target_temperature": "Ziel im festen Modus (auch Rückfallwert, wenn das Thermostat keine Solltemperatur hat)."
+          "target_temperature": "Ziel im festen Modus (auch Rückfallwert, wenn das Thermostat keine Solltemperatur hat).",
+          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet."
         }
       },
       "reconfigure": {
@@ -70,7 +72,9 @@
           "half_life_days": "Halbwertszeit des Verlaufs",
           "history_days": "Verlauf zum Lernen",
           "update_interval_minutes": "Aktualisierungsintervall",
-          "arrival_hold_minutes": "Halten nach der Ankunftszeit"
+          "arrival_hold_minutes": "Halten nach der Ankunftszeit",
+          "preheat_preset": "Vorheiz-Preset",
+          "max_sensor_age_minutes": "Maximales Sensoralter"
         },
         "data_description": {
           "target_mode": "Ein festes Ziel verwenden oder der Solltemperatur des Thermostats folgen.",
@@ -78,7 +82,9 @@
           "half_life_days": "Ältere Daten zählen nach so vielen Tagen nur noch halb (passt sich den Jahreszeiten an).",
           "history_days": "Tage des Recorder-Verlaufs, die beim ersten Start und durch die Aktion Neu trainieren geladen werden.",
           "update_interval_minutes": "Wie oft die Schätzung neu berechnet wird, in Minuten.",
-          "arrival_hold_minutes": "Mit Ankunftssensor: wie lange „Jetzt vorheizen“ nach der erwarteten Ankunftszeit eingeschaltet bleibt, wenn es an war und noch niemand angekommen ist (eine statische, bereits vergangene Ankunftszeit). 0 = aus zur Ankunftszeit."
+          "arrival_hold_minutes": "Mit Ankunftssensor: wie lange „Jetzt vorheizen“ nach der erwarteten Ankunftszeit eingeschaltet bleibt, wenn es an war und noch niemand angekommen ist (eine statische, bereits vergangene Ankunftszeit). 0 = aus zur Ankunftszeit.",
+          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet.",
+          "max_sensor_age_minutes": "Die Innentemperatur gilt als fehlend, wenn ihr Sensor so lange nichts gemeldet hat (defekter Sensor oder leere Batterie); die Zone meldet dann no_temperature."
         }
       }
     }
@@ -87,7 +93,8 @@
     "target_mode": {
       "options": {
         "fixed": "Fester Wert",
-        "climate": "Dem Thermostatziel folgen"
+        "climate": "Dem Thermostatziel folgen",
+        "climate_preset": "Preset-Temperatur des Thermostats (z. B. Komfort von Versatile Thermostat)"
       }
     }
   },
@@ -118,6 +125,9 @@
       },
       "dead_time": {
         "name": "Totzeit"
+      },
+      "arrival_temperature": {
+        "name": "Temperatur bei Ankunft"
       }
     }
   },
@@ -178,6 +188,12 @@
     },
     "update_failed": {
       "message": "Aktualisierung der Zone {zone} fehlgeschlagen: {error}"
+    }
+  },
+  "issues": {
+    "setpoint_below_current": {
+      "title": "{zone}: der Sollwert fordert nie ein Vorheizen an",
+      "description": "Die Zone {zone} folgt dem Thermostatziel und hat einen Ankunftssensor, aber seit 24 Stunden liegt ihr Sollwert unter der Raumtemperatur (eine Absenkung wie Eco oder Frostschutz), daher wird nie ein Vorheizen berechnet. Stelle in den Zonenoptionen den Zielmodus auf \"Preset-Temperatur des Thermostats\" (Preset comfort): das Vorheizen zielt dann auf die Komforttemperatur, während das Thermostat die Absenkung hält."
     }
   }
 }
