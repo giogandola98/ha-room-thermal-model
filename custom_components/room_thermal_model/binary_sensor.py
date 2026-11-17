@@ -64,4 +64,5 @@ class PreheatNowBinarySensor(RTMEntity, BinarySensorEntity):
             ),
             "hold_until": zone.hold_until.isoformat() if zone.hold_until else None,
             "lead_minutes": round(zone.lead_minutes) if zone.lead_minutes is not None else None,
+            "lead_quantile": zone.lead_quantile,
         }

@@ -15,7 +15,8 @@ parameters fitted on the first 80 % only):
   the temperature at the end of the episode) is compared with the closed-form preheat
   prediction (mean outdoor over the episode) → MAE in minutes.
 
-Maturity (0..1) = data_factor × skill_factor:
+Maturity (0..1) = data_factor × skill (with ≥ 5 real heat-ups the skill is the mean of
+the forecast skill below and the heat-up skill, see :func:`episode_skill`):
 
 - ``data_factor = min(1, heating_hours / 20) · min(1, cooling_hours / 40)`` where the
   hours count usable steps with effort ≥ 0.5 (heating) and effort < 0.1 (cooling);
@@ -272,7 +273,211 @@ def data_factor(heating_hours: float, cooling_hours: float) -> float:
     )
 
 
+def episode_skill(loo: dict | None) -> float | None:
+    """Skill on real heat-ups (leave-one-out): no bias and the p80 really covers ~80 %.
+
+    1 with |bias| ≤ 10 min and coverage ≥ 70 %; 0 at |bias| ≥ 60 min or coverage ≤ 30 %.
+    None without enough episodes.
+    """
+    if not loo or loo.get("bias_min") is None or loo.get("p80_coverage") is None:
+        return None
+    bias = abs(float(loo["bias_min"]))
+    cov = float(loo["p80_coverage"])
+    b = min(1.0, max(0.0, (60.0 - bias) / 50.0))
+    c = min(1.0, max(0.0, (cov - 0.3) / 0.4))
+    return b * c
+
+
 def maturity(
-    heating_hours: float, cooling_hours: float, rmse: float | None, baseline: float | None
+    heating_hours: float,
+    cooling_hours: float,
+    rmse: float | None,
+    baseline: float | None,
+    loo: dict | None = None,
 ) -> float:
-    return data_factor(heating_hours, cooling_hours) * skill_factor(rmse, baseline)
+    """data × skill; with ≥ 5 real heat-ups the skill averages the forecast skill and the
+    heat-up skill (bias and p80 coverage of the corrected preheat)."""
+    skill = skill_factor(rmse, baseline)
+    ep = episode_skill(loo)
+    if ep is not None:
+        skill = 0.5 * (skill + ep)
+    return data_factor(heating_hours, cooling_hours) * skill
+
+
+# -- decision-oriented episode errors -----------------------------------------------------
+# A preheat is judged on the time to *really* be at the target. The full-power model is
+# systematically early on real heat-ups: the valve throttles in its proportional band
+# and the burner cycles. Each real heat-up gives the ratio measured / predicted minutes.
+EP_IDLE_ROWS = 12  # ≥ 1 h without heating before the episode
+EP_MIN_RISE_K = 1.0
+EP_SETPOINT_BAND_K = 0.3  # "at target": setpoint − 0.3 K ...
+EP_TOP_BAND_K = 0.15  # ... or, without a setpoint, the run's top − 0.15 K
+EP_TAIL_ROWS = 6  # the run's top is looked for up to 30 min after heating stops
+MAX_EPISODE_ERRORS = 40
+MIN_CORRECTION_EPISODES = 5
+CORRECTION_MIN, CORRECTION_MAX = 0.8, 1.5
+QUANTILE_MIN, QUANTILE_MAX = 0.8, 2.0
+FEW_EPISODES_P80 = 1.25  # p80 / p50 with fewer than MIN_CORRECTION_EPISODES
+
+
+@dataclass
+class EpisodeError:
+    ts: float  # epoch s of the episode start
+    predicted_min: float  # full-power closed-form prediction
+    measured_min: float
+    duty: float  # mean reported effort over the climb (burner/valve cycling)
+
+    @property
+    def ratio(self) -> float:
+        return self.measured_min / self.predicted_min
+
+    def to_list(self) -> list[float]:
+        return [
+            round(self.ts),
+            round(self.predicted_min, 1),
+            round(self.measured_min, 1),
+            round(self.duty, 3),
+        ]
+
+    @classmethod
+    def from_list(cls, row: list[float]) -> EpisodeError:
+        return cls(float(row[0]), float(row[1]), float(row[2]), float(row[3]))
+
+
+def decision_episodes(
+    grid: Grid, bad: list[bool], pause_rows: int = MERGE_PAUSE_ROWS
+) -> list[tuple[int, int, int, float]]:
+    """(start, reach, end, target) of real heat-ups for the decision error.
+
+    Merged heating runs (pauses ≤ ``pause_rows``) after ≥ ``EP_IDLE_ROWS`` idle rows,
+    rising ≥ ``EP_MIN_RISE_K``; ``target`` = setpoint − ``EP_SETPOINT_BAND_K`` when the
+    setpoint at the start is known (and reached), else the top − ``EP_TOP_BAND_K``;
+    ``reach`` = first row at or above it.
+    """
+    eff = [0.0 if e is None else e for e in grid.effort]
+    on = [e >= EPISODE_EFFORT for e in eff]
+    ind = grid.indoor
+    sp = grid.setpoint if len(grid.setpoint) == len(grid) else [None] * len(grid)
+    n = len(grid)
+    out: list[tuple[int, int, int, float]] = []
+    k = 0
+    while k < n:
+        if not on[k]:
+            k += 1
+            continue
+        j = k
+        while True:
+            nxt = next((i for i in range(j + 1, min(n, j + 2 + pause_rows)) if on[i]), None)
+            if nxt is None:
+                break
+            j = nxt
+        e = min(j + EP_TAIL_ROWS, n - 1)
+        if (
+            k >= EP_IDLE_ROWS
+            and not any(on[k - EP_IDLE_ROWS : k])
+            and not any(bad[k : e + 1])
+            and all(grid.effort[i] is not None for i in range(k, j + 1))
+        ):
+            temps = [ind[i] for i in range(k, e + 1)]
+            top = max(temps)  # type: ignore[type-var]
+            t0 = ind[k]
+            if t0 is not None and top - t0 >= EP_MIN_RISE_K:  # type: ignore[operator]
+                s = sp[k]
+                target = top - EP_TOP_BAND_K  # type: ignore[operator]
+                if s is not None and t0 < s - EP_SETPOINT_BAND_K <= top:
+                    target = s - EP_SETPOINT_BAND_K
+                r = next(i for i in range(k, e + 1) if ind[i] >= target - 1e-9)  # type: ignore[operator]
+                if r > k:
+                    out.append((k, r, j, target))
+        k = j + 1
+    return out
+
+
+def decision_errors(grid: Grid, p: Params, bad: list[bool]) -> list[EpisodeError]:
+    """Measured vs full-power predicted minutes of every real heat-up in the grid."""
+    step = grid.step_minutes
+    errs: list[EpisodeError] = []
+    for k, r, _j, target in decision_episodes(grid, bad):
+        if p.use_outdoor:
+            vals = [v for v in grid.outdoor[k : r + 1] if v is not None]
+            if not vals:
+                continue
+            tout = sum(vals) / len(vals)
+        else:
+            tout = 0.0
+        t0 = grid.indoor[k]
+        pred, _ = preheat_minutes(t0, target, tout, p.a, p.b, p.c, p.d_steps * step)  # type: ignore[arg-type]
+        if pred is None or pred <= 0:
+            continue
+        effs = [grid.effort[i] or 0.0 for i in range(k, r)]
+        duty = sum(effs) / len(effs) if effs else 1.0
+        errs.append(EpisodeError(grid.ts(k), pred, (r - k) * step, duty))
+    return errs
+
+
+def merge_errors(
+    stored: list[EpisodeError], fresh: list[EpisodeError], grid_start: float
+) -> list[EpisodeError]:
+    """Episodes still in the grid are re-evaluated (``fresh``); older ones are kept."""
+    kept = [e for e in stored if e.ts < grid_start]
+    merged = sorted(kept + fresh, key=lambda e: e.ts)
+    return merged[-MAX_EPISODE_ERRORS:]
+
+
+def _quantile(values: list[float], q: float) -> float:
+    s = sorted(values)
+    if not s:
+        return 1.0
+    pos = q * (len(s) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (pos - lo)
+
+
+@dataclass
+class Correction:
+    factor: float  # p50 / full power
+    p80: float  # p80 / full power
+    episodes: int
+    active: bool
+    duty: float | None  # mean duty of the source over the episodes (information)
+
+    def at(self, quantile: float) -> float:
+        """Multiplier for the minutes at ``quantile`` (0.5 = central)."""
+        if quantile <= 0.5:
+            return self.factor
+        if quantile <= 0.8:
+            return self.factor + (self.p80 - self.factor) * (quantile - 0.5) / 0.3
+        return self.p80 * (1.0 + (quantile - 0.8))  # gentle extrapolation
+
+
+def correction_from(ratios: list[float], duties: list[float] | None = None) -> Correction:
+    """Median / p80 of measured/predicted ratios (fewer than 5: no shift, p80 +25 %)."""
+    duty = sum(duties) / len(duties) if duties else None
+    if len(ratios) < MIN_CORRECTION_EPISODES:
+        return Correction(1.0, FEW_EPISODES_P80, len(ratios), False, duty)
+    med = min(CORRECTION_MAX, max(CORRECTION_MIN, _quantile(ratios, 0.5)))
+    p80 = min(QUANTILE_MAX, max(QUANTILE_MIN, _quantile(ratios, 0.8), med))
+    return Correction(med, p80, len(ratios), True, duty)
+
+
+def leave_one_out(errors: list[EpisodeError]) -> dict[str, float | int | None]:
+    """Bias / MAE (minutes) and p80 coverage of the correction, leave-one-out."""
+    res: list[tuple[float, bool]] = []
+    for i, e in enumerate(errors):
+        others = [o.ratio for j, o in enumerate(errors) if j != i]
+        corr = correction_from(others)
+        res.append(
+            (
+                e.predicted_min * corr.factor - e.measured_min,
+                e.measured_min <= e.predicted_min * corr.p80,
+            )
+        )
+    if not res:
+        return {"episodes": 0, "bias_min": None, "mae_min": None, "p80_coverage": None}
+    return {
+        "episodes": len(res),
+        "bias_min": sum(d for d, _ in res) / len(res),
+        "mae_min": sum(abs(d) for d, _ in res) / len(res),
+        "p80_coverage": sum(1 for _, c in res if c) / len(res),
+    }

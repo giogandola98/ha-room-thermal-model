@@ -45,6 +45,7 @@ from .const import (
     CONF_ARRIVAL_HOLD_MINUTES,
     CONF_HALF_LIFE_DAYS,
     CONF_HISTORY_DAYS,
+    CONF_LEAD_QUANTILE,
     CONF_MAX_SENSOR_AGE_MINUTES,
     CONF_PREHEAT_PRESET,
     CONF_TARGET_MODE,
@@ -54,6 +55,7 @@ from .const import (
     DEFAULT_ARRIVAL_HOLD_MINUTES,
     DEFAULT_HALF_LIFE_DAYS,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_LEAD_QUANTILE,
     DEFAULT_MAX_SENSOR_AGE_MINUTES,
     DEFAULT_PREHEAT_PRESET,
     DEFAULT_TARGET_MODE,
@@ -136,6 +138,8 @@ class ZoneData:
     arrival_at_latch: datetime | None = None  # arrival when preheat_now latched
     hold_until: datetime | None = None  # latched: off at this time (arrival passed)
     lead_minutes: float | None = None
+    lead_quantile: float | None = None
+    hold_cost: tuple[float, float] | None = None  # (K/h lost holding the target, duty)
     last_fit: datetime | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -263,6 +267,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         self.max_age = timedelta(
             minutes=float(options.get(CONF_MAX_SENSOR_AGE_MINUTES, DEFAULT_MAX_SENSOR_AGE_MINUTES))
         )
+        self.lead_quantile: float = float(options.get(CONF_LEAD_QUANTILE, DEFAULT_LEAD_QUANTILE))
         self._below_since: datetime | None = None  # setpoint_below_current with arrival
         self.model_config = ModelConfig(
             step_minutes=float(SAMPLE_INTERVAL_MINUTES),
@@ -594,6 +599,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             async with self._lock:
                 parameters = self.model.parameters()
                 quality = self.model.quality()
+                hold_cost = self.model.hold_cost(target_c, outdoor)
                 if indoor is not None and parameters is not None:
                     estimate = self.model.preheat(now, indoor, target_c, outdoor, forecast, max_c)
                     if arrival is not None:
@@ -615,6 +621,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
                             margin_k=UNREACHABLE_MARGIN_K,
                             max_iterations=LEAD_MAX_ITERATIONS,
                             tolerance_minutes=LEAD_TOLERANCE_MINUTES,
+                            quantile=self.lead_quantile,
                         )
         except MODEL_ERRORS as err:
             raise UpdateFailed(
@@ -693,6 +700,8 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             arrival_at_latch=latch.arrival_at_latch if latch else None,
             hold_until=latch.last_arrival + self.arrival_hold if latch else None,
             lead_minutes=lead,
+            lead_quantile=self.lead_quantile,
+            hold_cost=hold_cost,
             last_fit=self.last_fit,
         )
         self._schedule_timers(data, now)

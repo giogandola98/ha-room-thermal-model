@@ -74,7 +74,8 @@
           "update_interval_minutes": "Intervalle de mise à jour",
           "arrival_hold_minutes": "Maintien après l'heure d'arrivée",
           "preheat_preset": "Préréglage de préchauffage",
-          "max_sensor_age_minutes": "Âge maximal du capteur"
+          "max_sensor_age_minutes": "Âge maximal du capteur",
+          "lead_quantile": "Quantile de préchauffage"
         },
         "data_description": {
           "target_mode": "Utiliser une consigne fixe ou suivre la consigne du thermostat.",
@@ -84,7 +85,8 @@
           "update_interval_minutes": "Fréquence de recalcul de l'estimation, en minutes.",
           "arrival_hold_minutes": "Avec un capteur d'arrivée : durée pendant laquelle « préchauffer maintenant » reste activé après l'heure d'arrivée prévue s'il était activé et que personne n'est encore arrivé (heure d'arrivée statique déjà passée). 0 = désactivé à l'heure d'arrivée.",
           "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.PRESET_temp (PRESET = this preset)) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée.",
-          "max_sensor_age_minutes": "La température intérieure est considérée comme manquante si son capteur n'a rien transmis depuis cette durée (capteur en panne ou pile vide) ; la zone indique alors no_temperature."
+          "max_sensor_age_minutes": "La température intérieure est considérée comme manquante si son capteur n'a rien transmis depuis cette durée (capteur en panne ou pile vide) ; la zone indique alors no_temperature.",
+          "lead_quantile": "Prudence du début de préchauffage : utilise la durée de montée respectée aussi souvent par les montées réelles de la zone (0,8 = prêt à temps environ 4 fois sur 5 ; 0,5 = estimation centrale)."
         }
       }
     }
@@ -128,6 +130,9 @@
       },
       "arrival_temperature": {
         "name": "Température à l'arrivée"
+      },
+      "hold_cost": {
+        "name": "Coût de maintien"
       }
     }
   },

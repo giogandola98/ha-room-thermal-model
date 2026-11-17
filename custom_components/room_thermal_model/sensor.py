@@ -19,6 +19,7 @@ from .const import (
     KEY_ARRIVAL_TEMPERATURE,
     KEY_DEAD_TIME,
     KEY_HEATING_RATE,
+    KEY_HOLD_COST,
     KEY_MAX_REACHABLE,
     KEY_MODEL_MATURITY,
     KEY_PREHEAT_MINUTES,
@@ -51,6 +52,7 @@ async def async_setup_entry(
         TimeConstantSensor(coordinator),
         HeatingRateSensor(coordinator),
         DeadTimeSensor(coordinator),
+        HoldCostSensor(coordinator),
     ]
     if coordinator.inputs.arrival_sensor:
         entities.append(PreheatStartSensor(coordinator))
@@ -104,6 +106,16 @@ class PreheatMinutesSensor(RTMSensor):
             "details": dict(estimate.reason) if estimate else {},
             "arrival": zone.arrival.isoformat() if zone.arrival else None,
             "coast_c": _round(zone.coast_c),
+            "minutes_p50": _round(estimate.minutes_p50 if estimate else None, 1),
+            "minutes_p80": _round(estimate.minutes_p80 if estimate else None, 1),
+            "minutes_full_power": _round(estimate.minutes_full_power if estimate else None, 1),
+            "band_correction_minutes": (
+                _round(estimate.minutes_p50 - estimate.minutes_full_power, 1)
+                if estimate
+                and estimate.minutes_p50 is not None
+                and estimate.minutes_full_power is not None
+                else None
+            ),
         }
 
 
@@ -216,9 +228,36 @@ class ModelMaturitySensor(RTMSensor):
             "baseline_rmse_4h_c": _round(quality.baseline_rmse_4h_c, 3),
             "duration_mae_minutes": _round(quality.duration_mae_minutes, 1),
             "episodes": quality.episodes,
+            "episode_bias_minutes": _round(quality.episode_bias_minutes, 1),
+            "p80_coverage": _round(quality.p80_coverage, 2),
             "last_fit": zone.last_fit.isoformat() if zone.last_fit else None,
             "bootstrapping": self.coordinator.bootstrapping,
         }
+
+
+class HoldCostSensor(RTMSensor):
+    """Temperature the zone loses per hour at the target: the cost of keeping it warm."""
+
+    _key_name = KEY_HOLD_COST
+    _attr_native_unit_of_measurement = UNIT_KELVIN_PER_HOUR
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self) -> float | None:
+        """K/h lost at the target at the current outdoor temperature (unknown if unusable)."""
+        zone = self.zone
+        if zone is None or zone.hold_cost is None:
+            return None
+        return _round(zone.hold_cost[0], 3)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Share of the full heating power needed to hold the target."""
+        zone = self.zone
+        if zone is None or zone.hold_cost is None:
+            return {}
+        return {"duty_percent": round(zone.hold_cost[1] * 100, 1), "target_c": zone.target_c}
 
 
 class RTMParameterSensor(RTMSensor):
