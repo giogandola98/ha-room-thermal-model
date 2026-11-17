@@ -38,6 +38,9 @@ TARGET_SCHEMA = vol.Schema(
     }
 )
 
+ATTR_REPLACE = "replace"
+RETRAIN_SCHEMA = TARGET_SCHEMA.extend({vol.Optional(ATTR_REPLACE, default=False): cv.boolean})
+
 
 def _zone_entities(hass: HomeAssistant, entry: RTMConfigEntry) -> set[str]:
     """Inputs of the zone plus the entities it provides."""
@@ -84,7 +87,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         result: dict[str, Any] = {}
         for entry in _target_entries(hass, call):
             coordinator: RTMCoordinator = entry.runtime_data
-            result[coordinator.zone_name] = {"samples": await coordinator.async_retrain()}
+            samples = await coordinator.async_retrain(replace=bool(call.data.get(ATTR_REPLACE)))
+            result[coordinator.zone_name] = {"samples": samples}
         return result
 
     async def _reset(call: ServiceCall) -> None:
@@ -111,7 +115,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         DOMAIN,
         SERVICE_RETRAIN,
         _retrain,
-        schema=TARGET_SCHEMA,
+        schema=RETRAIN_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(DOMAIN, SERVICE_RESET, _reset, schema=TARGET_SCHEMA)

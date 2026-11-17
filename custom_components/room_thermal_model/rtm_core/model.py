@@ -5,7 +5,7 @@ from __future__ import annotations
 import bisect
 import time
 from collections.abc import Iterable, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
@@ -18,9 +18,9 @@ from .base import (
     ThermalModel,
     ThermalParameters,
 )
-from .cooling import cooling_tau
-from .deadtime import tangent_dead_time
-from .episodes import episode_heating_rate, learning_effort, regulation_mask
+from .cooling import CoolingEstimate, cooling_tau
+from .deadtime import DeadTimeEstimate, tangent_dead_time
+from .episodes import EpisodeRate, episode_heating_rate, learning_effort, regulation_mask
 from .fit import Dataset, FitResult, build_dataset, fit_rc
 from .forecast import mean_over, outdoor_curve, solve_duration
 from .grid import Grid, ceil_ts, dt_of, floor_ts, resample, ts_of
@@ -31,6 +31,7 @@ from .quality import (
     bad_rows,
     evaluate,
     experience_hours,
+    heat_up_episodes,
     maturity,
 )
 
@@ -51,6 +52,22 @@ NO_OUTDOOR_MEAN_C = 15.0  # no outdoor data: c absorbs b·mean(Tout); allow for 
 
 def _r(v: float | None, nd: int = 4) -> float | None:
     return None if v is None else round(v, nd)
+
+
+@dataclass
+class _FitOutcome:
+    res: FitResult
+    ds: Dataset
+    effort: list[float | None]
+    regulation: list[bool]
+    bad: list[bool]
+    heat_h: float
+    cool_h: float
+    fixed: dict[int, float]
+    fallbacks: list[str]
+    cool: CoolingEstimate | None
+    tangent: DeadTimeEstimate | None
+    episode: EpisodeRate | None
 
 
 class RCThermalModel(ThermalModel):
@@ -90,6 +107,14 @@ class RCThermalModel(ThermalModel):
         self._data_end_at_fit: float | None = None
         self._summary: dict[str, Any] = {}
 
+    def reset_parameters(self) -> None:
+        """Forget the learnt parameters and quality, keep the data (a fit becomes due)."""
+        self._params = None
+        self._quality = None
+        self._last_fit_ts = None
+        self._data_end_at_fit = None
+        self._summary = {}
+
     def load_history(self, samples: Iterable[Sample], replace: bool = False) -> None:
         rows = sorted(samples, key=lambda s: s.ts)
         if replace:
@@ -101,7 +126,9 @@ class RCThermalModel(ThermalModel):
         cfg = self.config
         new = resample(rows, cfg.step_minutes, cfg.max_gap_minutes, cfg.outdoor_max_gap_minutes)
         if len(new):
-            self._grid = new if not len(self._grid) else self._grid.merged(new)
+            # history wins where it has an indoor value (the recorder has the real change
+            # times and the full input set); the stored grid keeps everything else
+            self._grid = new if not len(self._grid) else new.merged(self._grid)
         latest = ts_of(rows[-1].ts)
         if self._last_sample_ts is None or latest > self._last_sample_ts:
             self._last_sample_ts = latest
@@ -174,24 +201,23 @@ class RCThermalModel(ThermalModel):
     def _usable_hours(self) -> float:
         return self._grid.valid_indoor_count() * self.config.step_minutes / 60.0
 
-    def fit(self, now: datetime) -> dict[str, Any]:
-        t_start = time.perf_counter()
+    def _fit_grid(
+        self,
+        grid: Grid,
+        now_ts: float,
+        use_outdoor: bool | None = None,
+        d_candidates: list[int] | None = None,
+    ) -> _FitOutcome | None:
+        """Regression plus the fallbacks (cooling τ, tangent dead time, episode rate)."""
         cfg = self.config
-        now_ts = ts_of(now)
-        self._last_fit_ts = now_ts
-        # fit runs in an executor while samples keep arriving: work on a snapshot
-        grid = self._grid.snapshot()
-        self._data_end_at_fit = grid.end_ts
         regulation = regulation_mask(grid)
-        ds = build_dataset(grid, cfg, now_ts, skip=regulation)
+        ds = build_dataset(grid, cfg, now_ts, use_outdoor=use_outdoor, skip=regulation)
         if len(ds) * ds.dt_h < MIN_FIT_HOURS:
-            self._summary = {"status": "insufficient_data", "rows": len(ds)}
-            return dict(self._summary)
+            return None
         effort = learning_effort(grid, regulation)
-        res = fit_rc(ds, effort, cfg)
+        res = fit_rc(ds, effort, cfg, d_candidates=d_candidates)
         if res is None:
-            self._summary = {"status": "insufficient_data", "rows": len(ds)}
-            return dict(self._summary)
+            return None
 
         bad = bad_rows(grid, cfg.max_step_delta_k)
         heat_h, cool_h = experience_hours(grid, bad)
@@ -207,7 +233,7 @@ class RCThermalModel(ThermalModel):
         fallbacks: list[str] = []
         weak = heat_h < WEAK_EXCITATION_HOURS or cool_h < WEAK_EXCITATION_HOURS
         d_steps = res.d_steps
-        if weak and tangent is not None:
+        if weak and tangent is not None and d_candidates is None:
             d_steps = min(dmax, max(0, round(tangent.minutes / step)))
             fallbacks.append("dead_time_from_tangent")
         b_unidentified = "b" in res.projected
@@ -229,21 +255,60 @@ class RCThermalModel(ThermalModel):
                     fixed[1] = res.b
                 fallbacks.append("heating_rate_from_episodes")
                 res = self._refit(ds, effort, res, res.d_steps, fixed)
+        return _FitOutcome(
+            res,
+            ds,
+            effort,
+            regulation,
+            bad,
+            heat_h,
+            cool_h,
+            fixed,
+            fallbacks,
+            cool,
+            tangent,
+            episode,
+        )
 
+    def fit(self, now: datetime) -> dict[str, Any]:
+        t_start = time.perf_counter()
+        cfg = self.config
+        now_ts = ts_of(now)
+        self._last_fit_ts = now_ts
+        # fit runs in an executor while samples keep arriving: work on a snapshot
+        grid = self._grid.snapshot()
+        self._data_end_at_fit = grid.end_ts
+        out = self._fit_grid(grid, now_ts)
+        if out is None:
+            rows = len(build_dataset(grid, cfg, now_ts, skip=regulation_mask(grid)))
+            self._summary = {"status": "insufficient_data", "rows": rows}
+            return dict(self._summary)
+        res, ds, effort, regulation = out.res, out.ds, out.effort, out.regulation
+        bad, heat_h, cool_h = out.bad, out.heat_h, out.cool_h
+        fixed, fallbacks, cool, tangent, episode = (
+            out.fixed,
+            out.fallbacks,
+            out.cool,
+            out.tangent,
+            out.episode,
+        )
+        step = cfg.step_minutes
         reliable, unreliable_reason = self._plausible(res, ds.use_outdoor, fixed)
 
-        # holdout evaluation with parameters fitted on the first 80 %
+        # holdout evaluation with parameters fitted on the first 80 % only: the
+        # regression *and* its fallbacks (cooling τ, episode rate) see only training rows
         evaluation = None
         n = len(ds)
         if n * ds.dt_h >= MIN_QUALITY_HOURS:
             k_hold = ds.k[int((1.0 - HOLDOUT_FRACTION) * n)]
-            train = ds.subset(k_hold)
-            r_tr = fit_rc(
-                train, effort, cfg, d_candidates=[res.d_steps], fixed=fixed, mask=res.masked
+            train = grid.head(k_hold)
+            out_tr = self._fit_grid(
+                train, now_ts, use_outdoor=ds.use_outdoor, d_candidates=[res.d_steps]
             )
-            if r_tr is not None:
+            if out_tr is not None:
+                r_tr = out_tr.res
                 p_tr = Params(r_tr.a, r_tr.b, r_tr.c, r_tr.d_steps, ds.use_outdoor)
-                evaluation = evaluate(grid, p_tr, bad, k_hold)
+                evaluation = evaluate(grid, p_tr, bad, k_hold, effort=effort)
 
         self._params = {
             "a": res.a,
@@ -264,6 +329,8 @@ class RCThermalModel(ThermalModel):
             "cooling_hours": cool_h,
             "rmse_c": rmse,
             "baseline_rmse_c": base,
+            "rmse_4h_c": evaluation.rmse_4h if evaluation else None,
+            "baseline_rmse_4h_c": evaluation.baseline_rmse_4h if evaluation else None,
             "duration_mae_minutes": evaluation.duration_mae if evaluation else None,
             "episodes": evaluation.episodes if evaluation else 0,
         }
@@ -296,6 +363,7 @@ class RCThermalModel(ThermalModel):
             "cross_check": cross,
             "quality": {k: _r(v) if isinstance(v, float) else v for k, v in self._quality.items()},
             "evaluation_windows": evaluation.windows if evaluation else 0,
+            "heat_up_episodes_total": len(heat_up_episodes(grid, bad, 0, res.d_steps + 1)),
             "episode_errors_min": evaluation.episode_errors if evaluation else [],
             "fit_seconds": round(time.perf_counter() - t_start, 3),
         }
@@ -457,6 +525,8 @@ class RCThermalModel(ThermalModel):
             baseline_rmse_c=q["baseline_rmse_c"],
             duration_mae_minutes=q["duration_mae_minutes"],
             episodes=q["episodes"],
+            rmse_4h_c=q.get("rmse_4h_c"),
+            baseline_rmse_4h_c=q.get("baseline_rmse_4h_c"),
         )
 
     # -- persistence --------------------------------------------------------------------

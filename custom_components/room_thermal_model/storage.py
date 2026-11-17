@@ -9,6 +9,8 @@ Stored document (``.storage/room_thermal_model.<entry_id>``)::
       "bootstrapped": true,        # recorder history already merged once
       "inputs": ["climate...", ...] # sorted sample entities the model was learnt from
                                    # (null/missing in older documents: accepted as-is)
+      "history_merged": 2          # version of the last one-off recorder re-merge
+                                   # (store 1.2; missing in 1.1 documents = 0)
     }
 """
 
@@ -20,7 +22,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, SAVE_DELAY_SECONDS, STORAGE_VERSION
+from .const import DOMAIN, SAVE_DELAY_SECONDS, STORAGE_MINOR_VERSION, STORAGE_VERSION
 
 STORAGE_SCHEMA = 1
 
@@ -35,6 +37,7 @@ def empty_document() -> StoredData:
         "last_fit": None,
         "bootstrapped": False,
         "inputs": None,
+        "history_merged": 0,
     }
 
 
@@ -49,9 +52,13 @@ class RTMStore(Store[StoredData]):
     ) -> StoredData:
         """Migrate stored data to the current version.
 
-        Only version 1 exists so far; add ``if old_major_version < N`` steps here.
+        1.1 → 1.2: no ``history_merged`` key yet (0): the coordinator re-merges the
+        recorder history once. Add ``if old_major_version < N`` steps here.
         """
-        return old_data
+        data = dict(old_data)
+        if old_major_version == 1 and old_minor_version < 2:
+            data.setdefault("history_merged", 0)
+        return data
 
 
 class RTMStorage:
@@ -59,7 +66,9 @@ class RTMStorage:
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         """Initialize the storage for one zone."""
-        self._store = RTMStore(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}")
+        self._store = RTMStore(
+            hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}", minor_version=STORAGE_MINOR_VERSION
+        )
 
     async def async_load(self) -> StoredData:
         """Load the stored document (an empty one when nothing is stored)."""

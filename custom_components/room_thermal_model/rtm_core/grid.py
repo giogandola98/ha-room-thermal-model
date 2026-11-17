@@ -128,7 +128,12 @@ class Grid:
         self.start_ts += n * self.step_s
 
     def merged(self, other: Grid) -> Grid:
-        """Union of two grids; rows of ``self`` win unless their indoor value is missing."""
+        """Union of two grids; rows of ``self`` win unless their indoor value is missing.
+
+        A winning row that lacks the outdoor or setpoint value takes it from the other
+        grid's row (e.g. recorder history recorded the climate target the live grid did
+        not have yet, or vice versa).
+        """
         if self.start_ts is None or not len(self):
             return other.copy()
         if other.start_ts is None or not len(other):
@@ -139,18 +144,43 @@ class Grid:
         n = round((end - start) / step)
         out = Grid(self.step_minutes, start)
         out._pad(n)
-        for src in (other, self):  # self last: wins
-            off = round((src.start_ts - start) / step)  # type: ignore[operator]
-            for i in range(len(src)):
-                j = off + i
-                if src.indoor[i] is None and out.indoor[j] is not None:
-                    continue
-                out.indoor[j] = src.indoor[i]
-                out.outdoor[j] = src.outdoor[i]
-                out.effort[j] = src.effort[i]
-                out.excluded[j] = src.excluded[i]
-                out.setpoint[j] = src.setpoint[i] if i < len(src.setpoint) else None
+
+        def row(src: Grid, j: int) -> int | None:
+            i = j - round((src.start_ts - start) / step)  # type: ignore[operator]
+            return i if 0 <= i < len(src) else None
+
+        for j in range(n):
+            a, b = row(self, j), row(other, j)
+            win, lose, wi, li = self, other, a, b
+            if a is None or (self.indoor[a] is None and b is not None):
+                win, lose, wi, li = other, self, b, a
+            if wi is None:
+                continue
+            out.indoor[j] = win.indoor[wi]
+            out.effort[j] = win.effort[wi]
+            out.excluded[j] = win.excluded[wi]
+            outdoor = win.outdoor[wi]
+            setpoint = win.setpoint[wi] if wi < len(win.setpoint) else None
+            if li is not None:
+                if outdoor is None:
+                    outdoor = lose.outdoor[li]
+                if setpoint is None and li < len(lose.setpoint):
+                    setpoint = lose.setpoint[li]
+            out.outdoor[j] = outdoor
+            out.setpoint[j] = setpoint
         return out
+
+    def head(self, n: int) -> Grid:
+        """Copy of the first ``n`` rows."""
+        return Grid(
+            self.step_minutes,
+            self.start_ts,
+            self.indoor[:n],
+            self.outdoor[:n],
+            self.effort[:n],
+            self.excluded[:n],
+            self.setpoint[:n],
+        )
 
     def copy(self) -> Grid:
         return Grid(

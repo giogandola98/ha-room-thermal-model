@@ -122,7 +122,7 @@
   "services": {
     "retrain": {
       "name": "Neu trainieren",
-      "description": "Lädt den Recorder-Verlauf neu und passt das Modell der ausgewählten Zonen neu an (alle Zonen ohne Ziel).",
+      "description": "Führt den Recorder-Verlauf mit den gespeicherten Daten zusammen und passt das Modell der ausgewählten Zonen neu an (alle Zonen ohne Ziel).",
       "fields": {
         "entity_id": {
           "name": "Entitäten",
@@ -131,6 +131,10 @@
         "config_entry_id": {
           "name": "Zone",
           "description": "Konfigurationseintrag der Zone. Leer lassen für alle Zonen."
+        },
+        "replace": {
+          "name": "Ersetzen",
+          "description": "Verwirft die gespeicherten Daten und baut das Modell nur aus dem Recorder-Verlauf neu auf. Aus (Standard): der Recorder-Verlauf wird mit den gespeicherten Daten zusammengeführt (der Recorder gewinnt, wo er Daten hat), ältere Daten bleiben erhalten."
         }
       }
     },

@@ -31,6 +31,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_point_in_utc_time,
     async_track_state_change_event,
     async_track_time_interval,
@@ -51,9 +52,11 @@ from .const import (
     DEFAULT_TARGET_TEMPERATURE,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
+    HISTORY_MERGE_VERSION,
     LEAD_MAX_ITERATIONS,
     LEAD_TOLERANCE_MINUTES,
     PREHEAT_HOLD_MINUTES,
+    SAMPLE_DEBOUNCE_S,
     SAMPLE_INTERVAL_MINUTES,
     SAVE_DELAY_SECONDS,
     SNAPSHOT_MIN_INTERVAL_S,
@@ -204,6 +207,10 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         self.last_fit_summary: dict[str, Any] | None = None
         self.bootstrapped = False
         self.bootstrapping = False
+        self.history_merged = 0
+        self._sample_at: dict[str, datetime] = {}  # last state-change sample per entity
+        self._last_sample_at: datetime | None = None
+        self._deferred: dict[str, CALLBACK_TYPE] = {}
         self._lock = asyncio.Lock()
         self._retrain_lock = asyncio.Lock()
         self._pending: list[Sample] = []
@@ -243,12 +250,9 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         stored = await self.storage.async_load()
         model_data = stored.get("model")
         stored_inputs = stored.get("inputs")
-        if stored_inputs is not None and stored_inputs != sorted(self.inputs.sample_entities):
-            _LOGGER.info(
-                "Inputs of %s changed since the model was learnt: starting afresh",
-                self.zone_name,
-            )
-            model_data = None
+        inputs_changed = stored_inputs is not None and stored_inputs != sorted(
+            self.inputs.sample_entities
+        )
         if isinstance(model_data, dict) and model_data:
             try:
                 self.model = await self.hass.async_add_executor_job(
@@ -260,12 +264,30 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
                 self.snapshot = model_data
         self.last_fit = _parse_dt(stored.get("last_fit"))
         self.bootstrapped = bool(stored.get("bootstrapped")) and self.snapshot is not None
+        self.history_merged = int(stored.get("history_merged") or 0)
+        if inputs_changed and self.snapshot is not None:
+            # the data stays (and the recorder history of the new inputs is merged over
+            # it below); only the parameters learnt from the old inputs are dropped
+            _LOGGER.info(
+                "Inputs of %s changed since the model was learnt: refitting its parameters",
+                self.zone_name,
+            )
+            await self._async_model_job(self.model.reset_parameters)
+            self.last_fit = None
+            self.history_merged = 0
+            self._dirty = True
         self._async_subscribe()
         self._queue_sample(dt_util.utcnow())
         if not self.bootstrapped:
             self.bootstrapping = True
             self.config_entry.async_create_background_task(
                 self.hass, self.async_retrain(bootstrap=True), f"{DOMAIN}_bootstrap"
+            )
+        elif self.history_merged < HISTORY_MERGE_VERSION:
+            # one-off merge of the recorder history after an upgrade (fills the setpoint
+            # column of old data) or an input change
+            self.config_entry.async_create_background_task(
+                self.hass, self.async_retrain(), f"{DOMAIN}_history_merge"
             )
 
     @callback
@@ -293,6 +315,9 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
+        for unsub in self._deferred.values():
+            unsub()
+        self._deferred.clear()
         self._cancel_timers()
         if self._unsub_stop:
             self._unsub_stop()
@@ -325,12 +350,41 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
     def _async_handle_state_event(self, event: Event[EventStateChangedData]) -> None:
         if event.data["new_state"] is None or self._unloading:
             return
-        if event.data["entity_id"] != self.inputs.arrival_sensor:
-            self._queue_sample(event.data["new_state"].last_updated)
+        entity_id = event.data["entity_id"]
+        if entity_id != self.inputs.arrival_sensor:
+            self._debounced_sample(entity_id, event.data["new_state"].last_updated)
         # Debounced by the coordinator (immediate first call, then 10 s cooldown).
         self.config_entry.async_create_background_task(
             self.hass, self.async_request_refresh(), f"{DOMAIN}_state_refresh"
         )
+
+    @callback
+    def _debounced_sample(self, entity_id: str, ts: datetime) -> None:
+        """At most one state-change sample per entity per ``SAMPLE_DEBOUNCE_S``.
+
+        Thermostats publish bursts of attribute updates (hundreds per hour); a change
+        inside the window is not lost: one sample with the latest states is taken when
+        the window ends.
+        """
+        last = self._sample_at.get(entity_id)
+        if last is None or (ts - last).total_seconds() >= SAMPLE_DEBOUNCE_S:
+            self._sample_at[entity_id] = ts
+            self._queue_sample(ts)
+            return
+        if entity_id in self._deferred:
+            return
+
+        @callback
+        def _fire(_now: datetime) -> None:
+            self._deferred.pop(entity_id, None)
+            if self._unloading:
+                return
+            now = dt_util.utcnow()
+            self._sample_at[entity_id] = now
+            self._queue_sample(now)
+
+        delay = SAMPLE_DEBOUNCE_S - (ts - last).total_seconds()
+        self._deferred[entity_id] = async_call_later(self.hass, max(1.0, delay), _fire)
 
     @callback
     def _async_grid_sample(self, now: datetime) -> None:
@@ -341,6 +395,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
     def _queue_sample(self, ts: datetime) -> None:
         """Build a sample from the current states and queue it for the model."""
         self._pending.append(self.current_sample(ts))
+        self._last_sample_at = ts
         if self._flush_task is None or self._flush_task.done():
             self._flush_task = self.config_entry.async_create_background_task(
                 self.hass, self._async_flush_samples(), f"{DOMAIN}_flush_samples"
@@ -393,8 +448,14 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
     async def _async_update_data(self) -> ZoneData:
         now = dt_util.utcnow()
         # Every poll feeds the current values too (the model treats indoor/effort older
-        # than max_gap_minutes as missing; the grid timer covers long update intervals).
-        self._pending.append(self.current_sample(now))
+        # than max_gap_minutes as missing; the grid timer covers long update intervals),
+        # unless a sample was just taken (state-change bursts refresh every few seconds).
+        if (
+            self._last_sample_at is None
+            or (now - self._last_sample_at).total_seconds() >= SAMPLE_DEBOUNCE_S
+        ):
+            self._pending.append(self.current_sample(now))
+            self._last_sample_at = now
         await self._async_flush_samples()
         fitted = await self._async_fit_if_due(now)
         forecast = await self._async_get_forecast(now)
@@ -588,14 +649,17 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
             "last_fit": self.last_fit.isoformat() if self.last_fit else None,
             "bootstrapped": self.bootstrapped,
             "inputs": sorted(self.inputs.sample_entities),
+            "history_merged": self.history_merged,
         }
 
     # ------------------------------------------------------------------ actions
 
-    async def async_retrain(self, bootstrap: bool = False) -> int:
-        """Merge (bootstrap) or replace (retrain) the model data with recorder history.
+    async def async_retrain(self, bootstrap: bool = False, replace: bool = False) -> int:
+        """Merge the recorder history into the model data (or replace the data with it).
 
-        Returns the number of history samples loaded.
+        The history wins where it has data; older stored data (beyond the recorder
+        retention) is kept unless ``replace``. The one-off history merge flag is set
+        even when the recorder returns nothing. Returns the number of samples loaded.
         """
         async with self._retrain_lock:
             try:
@@ -603,7 +667,9 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
                 _LOGGER.debug("History for %s: %d samples", self.zone_name, len(samples))
                 if samples:
                     try:
-                        await self._async_model_job(self.model.load_history, samples, not bootstrap)
+                        await self._async_model_job(
+                            self.model.load_history, samples, replace and not bootstrap
+                        )
                     except MODEL_ERRORS:
                         _LOGGER.warning(
                             "Loading history of %s failed", self.zone_name, exc_info=True
@@ -613,6 +679,7 @@ class RTMCoordinator(DataUpdateCoordinator[ZoneData]):
                 await self._async_flush_samples()
                 await self._async_fit_if_due(dt_util.utcnow(), force=bool(samples))
                 self.bootstrapped = True
+                self.history_merged = HISTORY_MERGE_VERSION
             finally:
                 self.bootstrapping = False
             await self._async_snapshot(force=True)

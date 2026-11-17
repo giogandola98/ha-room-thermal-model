@@ -4,13 +4,16 @@ Evaluation (all on a chronological holdout = the last 20 % of the usable rows, w
 parameters fitted on the first 80 % only):
 
 - **forecast skill**: from every holdout row (every 30 min) the model is simulated
-  open-loop for 60 min with the observed effort and outdoor temperature, starting from
-  the observed indoor temperature; RMSE of the 60-min-ahead prediction is compared with
-  the persistence baseline (temperature unchanged).
-- **heat-up episodes**: effort ≥ 0.5 continuously after at least ``d`` idle steps,
-  ending with a rise ≥ 0.5 K. The actual duration (from the edge until the temperature
-  first reaches the temperature at the end of the episode) is compared with the
-  closed-form preheat prediction (mean outdoor over the episode) → MAE in minutes.
+  open-loop for 60 min and for 4 h with the *learning* effort (the effort the fit learns
+  from: thermostat regulation and throttling valve rows are unknown, so windows that
+  contain them are skipped, consistently with the fit) and the observed outdoor
+  temperature, starting from the observed indoor temperature; the RMSE of the prediction
+  is compared with the persistence baseline (temperature unchanged).
+- **heat-up episodes**: effort ≥ 0.5 after at least ``d`` idle steps (pauses of up to
+  ``MERGE_PAUSE_ROWS`` steps, burner cycling, belong to the same episode), ending with a
+  rise ≥ 0.5 K. The actual duration (from the edge until the temperature first reaches
+  the temperature at the end of the episode) is compared with the closed-form preheat
+  prediction (mean outdoor over the episode) → MAE in minutes.
 
 Maturity (0..1) = data_factor × skill_factor:
 
@@ -30,6 +33,8 @@ from .grid import Grid
 from .physics import preheat_minutes
 
 HORIZON_MIN = 60.0
+LONG_HORIZON_MIN = 240.0
+MERGE_PAUSE_ROWS = 3  # 15 min on the 5-min grid
 STRIDE_MIN = 30.0
 HOLDOUT_FRACTION = 0.2
 EPISODE_EFFORT = 0.5
@@ -55,6 +60,8 @@ class Evaluation:
     duration_mae: float | None
     episodes: int
     episode_errors: list[float]
+    rmse_4h: float | None = None
+    baseline_rmse_4h: float | None = None
 
 
 def bad_rows(grid: Grid, max_step_delta: float) -> list[bool]:
@@ -78,14 +85,25 @@ def step_temperature(
 
 
 def forecast_rmse(
-    grid: Grid, p: Params, bad: list[bool], k_start: int, k_end: int | None = None
+    grid: Grid,
+    p: Params,
+    bad: list[bool],
+    k_start: int,
+    k_end: int | None = None,
+    horizon_min: float = HORIZON_MIN,
+    effort: list[float | None] | None = None,
 ) -> tuple[float | None, float | None, int]:
-    """60-min-ahead open-loop RMSE vs persistence for windows starting in [k_start, k_end)."""
+    """Open-loop RMSE vs persistence ``horizon_min`` ahead, windows starting in [k_start, k_end).
+
+    ``effort`` replaces the grid's effort column (e.g. the learning effort, None where
+    the reported effort is not the heat delivered: such windows are skipped).
+    """
     step = grid.step_minutes
-    h = int(round(HORIZON_MIN / step))
+    h = int(round(horizon_min / step))
     stride = max(1, int(round(STRIDE_MIN / step)))
     dt_h = step / 60.0
-    ind, out, eff = grid.indoor, grid.outdoor, grid.effort
+    ind, out = grid.indoor, grid.outdoor
+    eff = grid.effort if effort is None else effort
     n = len(ind)
     k_end = n if k_end is None else k_end
     se = se0 = 0.0
@@ -125,7 +143,8 @@ def heat_up_episodes(
     """(k_edge, k_end, k_reach) for qualifying episodes starting at or after ``k_start``.
 
     ``k_end`` is the first row after the episode (temperature at heating stop);
-    ``k_reach`` the first row at which that temperature was reached.
+    ``k_reach`` the first row at which that temperature was reached. Pauses of up to
+    ``MERGE_PAUSE_ROWS`` known-idle rows followed by heating again continue the episode.
     """
     eff, ind = grid.effort, grid.indoor
     n = len(eff)
@@ -143,11 +162,31 @@ def heat_up_episodes(
             continue
         j = k
         broken = False
-        while j < n and (ej := eff[j]) is not None and ej >= EPISODE_EFFORT:
-            if bad[j]:
-                broken = True
+        while True:
+            while j < n and (ej := eff[j]) is not None and ej >= EPISODE_EFFORT:
+                if bad[j]:
+                    broken = True
+                    break
+                j += 1
+            if broken:
                 break
-            j += 1
+            # a short idle pause followed by heating again: same episode
+            p_end = j
+            while p_end < n and p_end - j < MERGE_PAUSE_ROWS:
+                ep = eff[p_end]
+                if ep is None or ep >= EPISODE_EFFORT or bad[p_end]:
+                    break
+                p_end += 1
+            if (
+                p_end > j
+                and p_end < n
+                and (ep := eff[p_end]) is not None
+                and ep >= EPISODE_EFFORT
+                and not bad[p_end]
+            ):
+                j = p_end
+                continue
+            break
         if broken or j >= n or bad[j]:
             k = j + 1
             continue
@@ -187,12 +226,24 @@ def episode_errors(grid: Grid, p: Params, episodes: list[tuple[int, int, int]]) 
     return errs
 
 
-def evaluate(grid: Grid, p: Params, bad: list[bool], k_holdout: int) -> Evaluation:
-    rmse, base, windows = forecast_rmse(grid, p, bad, k_holdout)
+def evaluate(
+    grid: Grid,
+    p: Params,
+    bad: list[bool],
+    k_holdout: int,
+    effort: list[float | None] | None = None,
+) -> Evaluation:
+    """Holdout evaluation from row ``k_holdout`` (``effort``: see :func:`forecast_rmse`)."""
+    rmse, base, windows = forecast_rmse(grid, p, bad, k_holdout, effort=effort)
+    rmse4, base4, _ = forecast_rmse(
+        grid, p, bad, k_holdout, horizon_min=LONG_HORIZON_MIN, effort=effort
+    )
     eps = heat_up_episodes(grid, bad, k_holdout, p.d_steps + 1)
     errs = episode_errors(grid, p, eps)
     mae = sum(abs(e) for e in errs) / len(errs) if errs else None
-    return Evaluation(rmse, base, windows, mae, len(errs), [round(e, 1) for e in errs])
+    return Evaluation(
+        rmse, base, windows, mae, len(errs), [round(e, 1) for e in errs], rmse4, base4
+    )
 
 
 def experience_hours(grid: Grid, bad: list[bool]) -> tuple[float, float]:

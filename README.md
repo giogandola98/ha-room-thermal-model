@@ -112,7 +112,7 @@ expect larger errors.
 |---|---|
 | `sensor.<zone>_preheat_minutes` | minutes of full heating needed to reach the target; unknown while learning, when unreachable or without outdoor data (attribute `reason`, e.g. `unreachable`, `no_outdoor`) |
 | `sensor.<zone>_max_reachable_temperature` | highest temperature reachable at the outdoor temperature averaged over the preheat window, capped at the climate's `max_temp` (30 °C when unknown); the uncapped model value is in the `details` attribute of the preheat sensor as `t_infinity_c` |
-| `sensor.<zone>_model_maturity` | 0–100 %; attributes `rmse_c`, `baseline_rmse_c`, `duration_mae_minutes`, `heating_hours`, `cooling_hours` |
+| `sensor.<zone>_model_maturity` | 0–100 %; attributes `rmse_c`, `baseline_rmse_c` (1 h ahead), `rmse_4h_c`, `baseline_rmse_4h_c` (4 h ahead), `duration_mae_minutes`, `heating_hours`, `cooling_hours` |
 | `sensor.<zone>_preheat_start` | latest time to start heating to be at the target on arrival (only with an arrival sensor). The room keeps cooling until then, so it is computed from the temperature the room will have at the start time, not the current one. When the target is unreachable it aims at 0.5 K below the max reachable temperature instead |
 | `binary_sensor.<zone>_preheat_now` | on when it is time to start heating (only with an arrival sensor). It latches: once on it stays on until the arrival, unless the arrival moves more than (needed minutes + 30 min) away |
 | `sensor.<zone>_time_constant`, `_heating_rate`, `_dead_time` | diagnostic: learnt parameters |
@@ -128,8 +128,15 @@ model needs outdoor data but none is available: no sensor, no forecast and no re
 learnt yet) or `unreliable` (the learnt parameters failed the plausibility check; the
 diagnostics show `unreliable_reason`).
 
-Changing the input sensors via **Reconfigure** discards the learnt model and re-imports
-the history automatically.
+Changing the input sensors via **Reconfigure** keeps the stored data, drops only the
+learnt parameters and merges the recorder history of the new inputs over the stored data
+(the recorder wins where it has data); the next fit relearns the parameters.
+
+`retrain` merges the recorder history into the stored data (the recorder wins where it
+has data, so data older than the recorder retention is kept); `replace: true` discards the
+stored data and rebuilds it from the recorder only (the behaviour before 0.4). After the
+upgrade to this version the history is merged once automatically, which fills in the
+climate setpoint of data recorded before the setpoint was tracked.
 
 Services: `room_thermal_model.retrain`, `room_thermal_model.reset`,
 `room_thermal_model.export_diagnostics`. Each accepts an optional `entity_id` (any entity

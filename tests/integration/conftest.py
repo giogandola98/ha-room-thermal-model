@@ -146,8 +146,12 @@ class FakeModel(ThermalModel):
     due: bool = False
     reachable: bool = True
     preheat_calls: list[dict[str, Any]] = field(default_factory=list)
+    resets: int = 0
+    parameter_resets: int = 0
+    history_calls: list[bool] = field(default_factory=list)  # ``replace`` of each call
 
     def load_history(self, samples: Iterable[Sample], replace: bool = False) -> None:
+        self.history_calls.append(replace)
         if replace:
             self.history = []
         self.history.extend(samples)
@@ -224,7 +228,12 @@ class FakeModel(ThermalModel):
             duration_mae_minutes=None,
         )
 
+    def reset_parameters(self) -> None:
+        self.parameter_resets += 1
+        self.params = None
+
     def reset(self) -> None:
+        self.resets += 1
         self.samples.clear()
         self.history.clear()
         self.params = None
