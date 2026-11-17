@@ -14,7 +14,7 @@ exactly minute by minute::
   "heating" but no heat arrives (boiler idle, heating season not started);
 - sensor readings with Gaussian noise (σ≈0.05 K) and 0.1 K quantisation;
 - outdoor temperature: daily sinusoid + weather fronts (smooth level changes);
-- disturbances: unflagged window openings (1–3 K drop in 10–20 min), missing data
+- disturbances: unflagged window openings (1–3 K drop in 10–20 min by default), missing data
   (no samples for 30–150 min), single-sample glitches, short "excluded" periods.
 
 Everything is driven by ``random.Random(seed)``: identical inputs give identical runs.
@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 from .base import Sample, ThermalParameters
@@ -47,6 +47,7 @@ class RoomSpec:
     noise_sigma: float = 0.05
     quantum: float = 0.1
     windows_per_week: float = 2.0
+    window_minutes: tuple[int, int] = (10, 20)  # duration range of a window opening
     gaps_per_week: float = 1.0
     glitches_per_week: float = 3.0
     excluded_per_week: float = 0.5
@@ -215,7 +216,7 @@ def generate(
         for t in _events(ev_rng, spec.windows_per_week, days):
             # windows are opened during the day
             m = int(t // 1440) * 1440 + int(ev_rng.uniform(7.5, 21.5) * 60)
-            dur = ev_rng.randint(10, 20)
+            dur = ev_rng.randint(*spec.window_minutes)
             drop = ev_rng.uniform(1.0, 3.0)
             if m < n:
                 window_at[m] = (dur, drop)
@@ -342,6 +343,67 @@ def true_coast(
     return temp
 
 
+def report_on_change(
+    run: SyntheticRun | list[Sample],
+    threshold_k: float = 0.07,
+    max_interval_min: float = 60.0,
+) -> list[Sample]:
+    """Turn a dense series into what a report-on-change room sensor delivers.
+
+    Many battery sensors (Zigbee, BLE) only report when the temperature moved by
+    ``threshold_k`` since the last report, or every ``max_interval_min`` otherwise. Home
+    Assistant keeps the last state, so every sample carries the last *reported* value:
+    on the model grid the indoor temperature becomes a staircase. Other fields (effort,
+    outdoor, setpoint, excluded) are untouched; samples without a reading stay without.
+    """
+    samples = run.samples if isinstance(run, SyntheticRun) else run
+    out: list[Sample] = []
+    last: float | None = None
+    last_ts: datetime | None = None
+    max_age = timedelta(minutes=max_interval_min)
+    for s in samples:
+        if s.indoor_c is None:
+            out.append(s)
+            continue
+        if (
+            last is None
+            or last_ts is None
+            or abs(s.indoor_c - last) >= threshold_k - 1e-9
+            or s.ts - last_ts >= max_age
+        ):
+            last, last_ts = s.indoor_c, s.ts
+        out.append(replace(s, indoor_c=last))
+    return out
+
+
+def slow_radiator_room(**kw: object) -> RoomSpec:
+    """Well-insulated room with an undersized radiator: slow rise, very slow cooling.
+
+    a = 0.6 K/h, τ = 80 h, dead time 10 min (the kind of room whose staircase sensor
+    exposed the robust-fit bias). Fine-resolution sensor (0.01 K, low noise): meant to be
+    passed through :func:`report_on_change`.
+    """
+    base: dict[str, object] = {
+        "name": "slow_radiator",
+        "a": 0.6,
+        "b": 1.0 / 80.0,
+        "c": 0.05,
+        "dead_time_minutes": 10.0,
+        "comfort_c": 20.0,
+        "eco_c": 18.0,
+        "noise_sigma": 0.02,
+        "quantum": 0.01,
+        "outdoor_mean": 9.0,
+        "outdoor_daily_amp": 3.0,
+        "front_amp": 3.0,
+        "weekday_comfort": ((6.0, 9.0), (16.0, 23.0)),
+        "weekend_comfort": ((8.0, 23.0),),
+        "seed": 21,
+    }
+    base.update(kw)
+    return RoomSpec(**base)  # type: ignore[arg-type]
+
+
 def trv_room(**kw: object) -> RoomSpec:
     """Radiator behind a thermostatic valve, with two days of boiler off."""
     base: dict[str, object] = {
@@ -396,4 +458,5 @@ ROOMS: dict[str, Callable[..., RoomSpec]] = {
     "no_outdoor": no_outdoor_room,
     "trv": trv_room,
     "trv_eco_comfort": trv_eco_comfort_room,
+    "slow_radiator": slow_radiator_room,
 }

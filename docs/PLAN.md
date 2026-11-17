@@ -17,8 +17,8 @@ independent and usable by anyone.
     current value and history; the weather entity gives the forecast for the preheat
     window (hourly → twice_daily → daily fallback) and is the outdoor fallback when no
     sensor is set. With neither, the model learns a fixed equilibrium (no outdoor term);
-  - no window sensor (user decision): window openings are handled by robust fitting
-    (Huber-weighted IRLS down-weights sudden drops) and the glitch guard;
+  - no window sensor (user decision): window openings are handled by an explicit
+    outlier mask (sustained residuals > 6·MAD for ≥ 3 steps) and the glitch guard;
   - optional arrival timestamp sensor (e.g. `sensor.house_next_return_eta`) to compute
     the preheat start time.
 - Target temperature: fixed number (default 20.5 °C) or "follow the climate target".
@@ -37,7 +37,9 @@ Lumped single-capacity (RC) model on a 5-minute grid:
   ridge prior toward radiator defaults (a≈3 K/h, b≈0.15 1/h, c≈0); grid search d ∈ 0..90 min
   choosing the lowest residual; constraints a>0, b>0 by projection.
 - Samples excluded: gaps > 15 min, |ΔT| > 1.5 K per step (glitches), missing indoor;
-  residual outliers (e.g. open window) down-weighted by Huber IRLS (2–3 passes).
+  sustained residual outliers (e.g. open window: |r| > 6·MAD for ≥ 3 consecutive steps)
+  masked. The indoor staircase of report-on-change sensors is interpolated linearly between
+  change points (≤ 3 h) before building the regression rows; the stored grid stays raw.
 - Cross-check / initialisation borrowed from Ecronika/ha-preheat (MIT, © 2025 Ecronika):
   tau from cooling segments (OLS of ln(T−Tout)), dead time by max-slope tangent after an
   off→on edge, trapezoidal forecast averaging with fixed-point duration solve.

@@ -45,7 +45,7 @@ REFIT_SECONDS = 3600.0
 WEAK_EXCITATION_HOURS = 3.0
 OUTDOOR_REF_HOURS = 24.0
 EPISODE_DISAGREEMENT = 0.3  # relative gap between fitted and episode ``a`` that triggers it
-PLAUSIBLE_MAX_RISE_K = 50.0  # full-effort equilibrium above outdoor (radiators: ~20-35 K)
+PLAUSIBLE_MAX_RISE_K = 150.0  # full-effort equilibrium above outdoor (well-insulated: >50 K)
 NO_OUTDOOR_MEAN_C = 15.0  # no outdoor data: c absorbs b·mean(Tout); allow for it
 
 
@@ -239,7 +239,7 @@ class RCThermalModel(ThermalModel):
             k_hold = ds.k[int((1.0 - HOLDOUT_FRACTION) * n)]
             train = ds.subset(k_hold)
             r_tr = fit_rc(
-                train, effort, cfg, d_candidates=[res.d_steps], fixed=fixed, scale=res.scale
+                train, effort, cfg, d_candidates=[res.d_steps], fixed=fixed, mask=res.masked
             )
             if r_tr is not None:
                 p_tr = Params(r_tr.a, r_tr.b, r_tr.c, r_tr.d_steps, ds.use_outdoor)
@@ -310,7 +310,7 @@ class RCThermalModel(ThermalModel):
         fixed: dict[int, float],
     ) -> FitResult:
         """Refit with some parameters fixed, keeping the dead-time diagnostics."""
-        res2 = fit_rc(ds, effort, self.config, d_candidates=[d_steps], fixed=fixed, scale=res.scale)
+        res2 = fit_rc(ds, effort, self.config, d_candidates=[d_steps], fixed=fixed, mask=res.masked)
         if res2 is None:
             return res
         res2.criterion, res2.flatness = res.criterion, res.flatness
