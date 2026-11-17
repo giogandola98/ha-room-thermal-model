@@ -100,7 +100,8 @@ Settings → Devices & services → Add integration → **Room Thermal Model**.
 | Arrival sensor | no | any timestamp sensor (e.g. `sensor.house_next_return_eta` from [Home Return Predictor](https://github.com/giogandola98/ha-home-return-predictor)); enables preheat start / preheat now |
 
 Options: target temperature (fixed, default 20.5 °C; follow the climate's target; or a
-climate preset temperature), preheat preset (`comfort`), data half-life (21 days),
+climate preset temperature; or the value of a sensor), preheat preset (`comfort`), target
+sensor, data half-life (21 days),
 history window (30 days), update interval (5 min), hold after the arrival time (30 min),
 maximum sensor age (360 min), preheat quantile (0.8).
 
@@ -113,6 +114,10 @@ preset mode. **"Thermostat preset temperature"** reads the climate's
 `preset_temperatures` attribute (Versatile Thermostat): the target is
 `preset_temperatures.<preset>_temp` of the configured preheat preset (default
 `comfort`), whatever preset is active; without that attribute the fixed target is used.
+**"Value of a sensor"** reads a numeric sensor, `number` or `input_number` (°C, else the
+system unit) as the target, so the preheat can aim at what your schedule wants at the
+expected arrival (e.g. a template that picks the day or night preset temperature from the
+arrival time); while it is unavailable the fixed target is used.
 
 **Setback floor.** When the climate's current setpoint is below the room temperature, the
 thermostat holds it: the predicted cooling before a preheat (and the temperature at

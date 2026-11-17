@@ -34,6 +34,7 @@ from .const import (
     CONF_OUTDOOR_SENSOR,
     CONF_PREHEAT_PRESET,
     CONF_ROOM_SENSOR,
+    CONF_TARGET_ENTITY,
     CONF_TARGET_MODE,
     CONF_TARGET_TEMPERATURE,
     CONF_UPDATE_INTERVAL_MINUTES,
@@ -60,6 +61,7 @@ from .const import (
     PRESET_SUGGESTIONS,
     TARGET_MODE_CLIMATE,
     TARGET_MODE_CLIMATE_PRESET,
+    TARGET_MODE_ENTITY,
     TARGET_MODE_FIXED,
     TARGET_TEMPERATURE_MAX,
     TARGET_TEMPERATURE_MIN,
@@ -89,7 +91,12 @@ def _target_fields() -> dict[Any, Any]:
     return {
         vol.Required(CONF_TARGET_MODE, default=DEFAULT_TARGET_MODE): SelectSelector(
             SelectSelectorConfig(
-                options=[TARGET_MODE_FIXED, TARGET_MODE_CLIMATE, TARGET_MODE_CLIMATE_PRESET],
+                options=[
+                    TARGET_MODE_FIXED,
+                    TARGET_MODE_CLIMATE,
+                    TARGET_MODE_CLIMATE_PRESET,
+                    TARGET_MODE_ENTITY,
+                ],
                 translation_key=CONF_TARGET_MODE,
                 mode=SelectSelectorMode.LIST,
             )
@@ -103,6 +110,9 @@ def _target_fields() -> dict[Any, Any]:
                 custom_value=True,
                 mode=SelectSelectorMode.DROPDOWN,
             )
+        ),
+        vol.Optional(CONF_TARGET_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number", "number"])
         ),
     }
 
@@ -167,6 +177,7 @@ class RoomThermalModelConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_PREHEAT_PRESET: str(
                         user_input.get(CONF_PREHEAT_PRESET) or DEFAULT_PREHEAT_PRESET
                     ),
+                    **_clean(user_input, (CONF_TARGET_ENTITY,)),
                     CONF_HALF_LIFE_DAYS: DEFAULT_HALF_LIFE_DAYS,
                     CONF_HISTORY_DAYS: DEFAULT_HISTORY_DAYS,
                     CONF_UPDATE_INTERVAL_MINUTES: DEFAULT_UPDATE_INTERVAL_MINUTES,
@@ -236,6 +247,7 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
                     CONF_LEAD_QUANTILE: float(
                         user_input.get(CONF_LEAD_QUANTILE, DEFAULT_LEAD_QUANTILE)
                     ),
+                    **_clean(user_input, (CONF_TARGET_ENTITY,)),
                 }
             )
         current = {

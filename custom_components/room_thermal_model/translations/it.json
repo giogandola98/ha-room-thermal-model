@@ -15,7 +15,8 @@
           "arrival_sensor": "Sensore orario di arrivo",
           "target_mode": "Temperatura obiettivo",
           "target_temperature": "Obiettivo fisso",
-          "preheat_preset": "Preset di preriscaldamento"
+          "preheat_preset": "Preset di preriscaldamento",
+          "target_entity": "Sensore obiettivo"
         },
         "data_description": {
           "zone_name": "Nome della zona (stanza o zona di riscaldamento); usato anche per gli ID delle entità.",
@@ -28,7 +29,8 @@
           "arrival_sensor": "Facoltativo. Sensore timestamp con l'arrivo previsto (es. sensor.house_next_return_eta di Home Return Predictor): abilita le entità inizio preriscaldamento e preriscalda ora.",
           "target_mode": "Usa un obiettivo fisso o segui la temperatura impostata sul termostato.",
           "target_temperature": "Obiettivo in modalità fissa (anche il ripiego quando il termostato non ha una temperatura impostata).",
-          "preheat_preset": "Con la modalità preset: preset la cui temperatura (preset_temperatures.PRESET_temp (PRESET = this preset)) è l'obiettivo del preriscaldamento, es. comfort. Se il termostato non la espone si usa l'obiettivo fisso."
+          "preheat_preset": "Con la modalità preset: preset la cui temperatura (preset_temperatures.PRESET_temp (PRESET = this preset)) è l'obiettivo del preriscaldamento, es. comfort. Se il termostato non la espone si usa l'obiettivo fisso.",
+          "target_entity": "Con la modalità obiettivo da sensore: sensore numerico o input_number (°C) il cui valore è l'obiettivo del preriscaldamento, ad es. un template con la temperatura della fascia oraria all'arrivo previsto. Se non è disponibile si usa l'obiettivo fisso."
         }
       },
       "reconfigure": {
@@ -75,7 +77,8 @@
           "arrival_hold_minutes": "Mantenimento dopo l'orario di arrivo",
           "preheat_preset": "Preset di preriscaldamento",
           "max_sensor_age_minutes": "Età massima del sensore",
-          "lead_quantile": "Quantile del preriscaldamento"
+          "lead_quantile": "Quantile del preriscaldamento",
+          "target_entity": "Sensore obiettivo"
         },
         "data_description": {
           "target_mode": "Usa un obiettivo fisso o segui la temperatura impostata sul termostato.",
@@ -86,7 +89,8 @@
           "arrival_hold_minutes": "Con un sensore di arrivo: per quanto tempo «preriscalda ora» resta acceso dopo l'orario di arrivo previsto se era acceso e nessuno è ancora arrivato (un orario di arrivo statico ormai passato). 0 = spento all'orario di arrivo.",
           "preheat_preset": "Con la modalità preset: preset la cui temperatura (preset_temperatures.PRESET_temp (PRESET = this preset)) è l'obiettivo del preriscaldamento, es. comfort. Se il termostato non la espone si usa l'obiettivo fisso.",
           "max_sensor_age_minutes": "La temperatura interna è considerata mancante se il suo sensore non comunica da più di questo tempo (sensore guasto o batteria scarica); la zona riporta allora no_temperature.",
-          "lead_quantile": "Quanto è prudente l'inizio del preriscaldamento: usa il tempo di salita rispettato con questa frequenza dalle salite reali della zona (0,8 = pronto in tempo circa 4 volte su 5; 0,5 = stima centrale)."
+          "lead_quantile": "Quanto è prudente l'inizio del preriscaldamento: usa il tempo di salita rispettato con questa frequenza dalle salite reali della zona (0,8 = pronto in tempo circa 4 volte su 5; 0,5 = stima centrale).",
+          "target_entity": "Con la modalità obiettivo da sensore: sensore numerico o input_number (°C) il cui valore è l'obiettivo del preriscaldamento, ad es. un template con la temperatura della fascia oraria all'arrivo previsto. Se non è disponibile si usa l'obiettivo fisso."
         }
       }
     }
@@ -96,7 +100,8 @@
       "options": {
         "fixed": "Valore fisso",
         "climate": "Segui l'obiettivo del termostato",
-        "climate_preset": "Temperatura di un preset del termostato (es. comfort di Versatile Thermostat)"
+        "climate_preset": "Temperatura di un preset del termostato (es. comfort di Versatile Thermostat)",
+        "entity": "Valore di un sensore (es. temperatura della fascia oraria all'arrivo)"
       }
     }
   },

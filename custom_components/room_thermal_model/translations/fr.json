@@ -15,7 +15,8 @@
           "arrival_sensor": "Capteur d'heure d'arrivée",
           "target_mode": "Température de consigne",
           "target_temperature": "Consigne fixe",
-          "preheat_preset": "Préréglage de préchauffage"
+          "preheat_preset": "Préréglage de préchauffage",
+          "target_entity": "Capteur de consigne"
         },
         "data_description": {
           "zone_name": "Nom de la zone (pièce ou zone de chauffage) ; également utilisé pour les ID d'entité.",
@@ -28,7 +29,8 @@
           "arrival_sensor": "Facultatif. Capteur horodaté avec l'arrivée prévue (par ex. sensor.house_next_return_eta de Home Return Predictor) : active les entités début du préchauffage et préchauffer maintenant.",
           "target_mode": "Utiliser une consigne fixe ou suivre la consigne du thermostat.",
           "target_temperature": "Consigne utilisée en mode fixe (également la valeur de repli si le thermostat n'a pas de consigne).",
-          "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.PRESET_temp (PRESET = this preset)) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée."
+          "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.PRESET_temp (PRESET = this preset)) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée.",
+          "target_entity": "En mode consigne par capteur : capteur numérique ou input_number (°C) dont la valeur est la consigne de préchauffage, p. ex. un template donnant la température du planning à l'arrivée prévue. La consigne fixe est utilisée tant qu'il est indisponible."
         }
       },
       "reconfigure": {
@@ -75,7 +77,8 @@
           "arrival_hold_minutes": "Maintien après l'heure d'arrivée",
           "preheat_preset": "Préréglage de préchauffage",
           "max_sensor_age_minutes": "Âge maximal du capteur",
-          "lead_quantile": "Quantile de préchauffage"
+          "lead_quantile": "Quantile de préchauffage",
+          "target_entity": "Capteur de consigne"
         },
         "data_description": {
           "target_mode": "Utiliser une consigne fixe ou suivre la consigne du thermostat.",
@@ -86,7 +89,8 @@
           "arrival_hold_minutes": "Avec un capteur d'arrivée : durée pendant laquelle « préchauffer maintenant » reste activé après l'heure d'arrivée prévue s'il était activé et que personne n'est encore arrivé (heure d'arrivée statique déjà passée). 0 = désactivé à l'heure d'arrivée.",
           "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.PRESET_temp (PRESET = this preset)) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée.",
           "max_sensor_age_minutes": "La température intérieure est considérée comme manquante si son capteur n'a rien transmis depuis cette durée (capteur en panne ou pile vide) ; la zone indique alors no_temperature.",
-          "lead_quantile": "Prudence du début de préchauffage : utilise la durée de montée respectée aussi souvent par les montées réelles de la zone (0,8 = prêt à temps environ 4 fois sur 5 ; 0,5 = estimation centrale)."
+          "lead_quantile": "Prudence du début de préchauffage : utilise la durée de montée respectée aussi souvent par les montées réelles de la zone (0,8 = prêt à temps environ 4 fois sur 5 ; 0,5 = estimation centrale).",
+          "target_entity": "En mode consigne par capteur : capteur numérique ou input_number (°C) dont la valeur est la consigne de préchauffage, p. ex. un template donnant la température du planning à l'arrivée prévue. La consigne fixe est utilisée tant qu'il est indisponible."
         }
       }
     }
@@ -96,7 +100,8 @@
       "options": {
         "fixed": "Valeur fixe",
         "climate": "Suivre la consigne du thermostat",
-        "climate_preset": "Température d'un préréglage du thermostat (ex. confort de Versatile Thermostat)"
+        "climate_preset": "Température d'un préréglage du thermostat (ex. confort de Versatile Thermostat)",
+        "entity": "Valeur d'un capteur (p. ex. température du planning à l'arrivée)"
       }
     }
   },
