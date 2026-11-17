@@ -28,7 +28,7 @@
           "arrival_sensor": "Facultatif. Capteur horodaté avec l'arrivée prévue (par ex. sensor.house_next_return_eta de Home Return Predictor) : active les entités début du préchauffage et préchauffer maintenant.",
           "target_mode": "Utiliser une consigne fixe ou suivre la consigne du thermostat.",
           "target_temperature": "Consigne utilisée en mode fixe (également la valeur de repli si le thermostat n'a pas de consigne).",
-          "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.<preset>_temp) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée."
+          "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.PRESET_temp (PRESET = this preset)) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée."
         }
       },
       "reconfigure": {
@@ -83,7 +83,7 @@
           "history_days": "Jours d'historique du recorder chargés au premier démarrage et par l'action de réentraînement.",
           "update_interval_minutes": "Fréquence de recalcul de l'estimation, en minutes.",
           "arrival_hold_minutes": "Avec un capteur d'arrivée : durée pendant laquelle « préchauffer maintenant » reste activé après l'heure d'arrivée prévue s'il était activé et que personne n'est encore arrivé (heure d'arrivée statique déjà passée). 0 = désactivé à l'heure d'arrivée.",
-          "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.<preset>_temp) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée.",
+          "preheat_preset": "En mode préréglage : préréglage dont la température (preset_temperatures.PRESET_temp (PRESET = this preset)) est la cible du préchauffage, ex. comfort. À défaut, la cible fixe est utilisée.",
           "max_sensor_age_minutes": "La température intérieure est considérée comme manquante si son capteur n'a rien transmis depuis cette durée (capteur en panne ou pile vide) ; la zone indique alors no_temperature."
         }
       }

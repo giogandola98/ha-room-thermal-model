@@ -28,7 +28,7 @@
           "arrival_sensor": "Optional. Zeitstempelsensor mit der erwarteten Ankunft (z. B. sensor.house_next_return_eta von Home Return Predictor): aktiviert die Entitäten Vorheizbeginn und Jetzt vorheizen.",
           "target_mode": "Ein festes Ziel verwenden oder der Solltemperatur des Thermostats folgen.",
           "target_temperature": "Ziel im festen Modus (auch Rückfallwert, wenn das Thermostat keine Solltemperatur hat).",
-          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.<preset>_temp) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet."
+          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet."
         }
       },
       "reconfigure": {
@@ -83,7 +83,7 @@
           "history_days": "Tage des Recorder-Verlaufs, die beim ersten Start und durch die Aktion Neu trainieren geladen werden.",
           "update_interval_minutes": "Wie oft die Schätzung neu berechnet wird, in Minuten.",
           "arrival_hold_minutes": "Mit Ankunftssensor: wie lange „Jetzt vorheizen“ nach der erwarteten Ankunftszeit eingeschaltet bleibt, wenn es an war und noch niemand angekommen ist (eine statische, bereits vergangene Ankunftszeit). 0 = aus zur Ankunftszeit.",
-          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.<preset>_temp) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet.",
+          "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet.",
           "max_sensor_age_minutes": "Die Innentemperatur gilt als fehlend, wenn ihr Sensor so lange nichts gemeldet hat (defekter Sensor oder leere Batterie); die Zone meldet dann no_temperature."
         }
       }

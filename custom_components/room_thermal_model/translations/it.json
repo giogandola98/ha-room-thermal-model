@@ -28,7 +28,7 @@
           "arrival_sensor": "Facoltativo. Sensore timestamp con l'arrivo previsto (es. sensor.house_next_return_eta di Home Return Predictor): abilita le entità inizio preriscaldamento e preriscalda ora.",
           "target_mode": "Usa un obiettivo fisso o segui la temperatura impostata sul termostato.",
           "target_temperature": "Obiettivo in modalità fissa (anche il ripiego quando il termostato non ha una temperatura impostata).",
-          "preheat_preset": "Con la modalità preset: preset la cui temperatura (preset_temperatures.<preset>_temp) è l'obiettivo del preriscaldamento, es. comfort. Se il termostato non la espone si usa l'obiettivo fisso."
+          "preheat_preset": "Con la modalità preset: preset la cui temperatura (preset_temperatures.PRESET_temp (PRESET = this preset)) è l'obiettivo del preriscaldamento, es. comfort. Se il termostato non la espone si usa l'obiettivo fisso."
         }
       },
       "reconfigure": {
@@ -83,7 +83,7 @@
           "history_days": "Giorni di storico del recorder caricati al primo avvio e dall'azione riaddestra.",
           "update_interval_minutes": "Ogni quanti minuti viene ricalcolata la stima.",
           "arrival_hold_minutes": "Con un sensore di arrivo: per quanto tempo «preriscalda ora» resta acceso dopo l'orario di arrivo previsto se era acceso e nessuno è ancora arrivato (un orario di arrivo statico ormai passato). 0 = spento all'orario di arrivo.",
-          "preheat_preset": "Con la modalità preset: preset la cui temperatura (preset_temperatures.<preset>_temp) è l'obiettivo del preriscaldamento, es. comfort. Se il termostato non la espone si usa l'obiettivo fisso.",
+          "preheat_preset": "Con la modalità preset: preset la cui temperatura (preset_temperatures.PRESET_temp (PRESET = this preset)) è l'obiettivo del preriscaldamento, es. comfort. Se il termostato non la espone si usa l'obiettivo fisso.",
           "max_sensor_age_minutes": "La temperatura interna è considerata mancante se il suo sensore non comunica da più di questo tempo (sensore guasto o batteria scarica); la zona riporta allora no_temperature."
         }
       }
