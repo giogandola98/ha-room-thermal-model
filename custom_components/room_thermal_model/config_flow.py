@@ -29,6 +29,7 @@ from .const import (
     CONF_HALF_LIFE_DAYS,
     CONF_HEAT_SOURCE,
     CONF_HISTORY_DAYS,
+    CONF_LEAD_QUANTILE,
     CONF_MAX_SENSOR_AGE_MINUTES,
     CONF_OUTDOOR_SENSOR,
     CONF_PREHEAT_PRESET,
@@ -41,6 +42,7 @@ from .const import (
     DEFAULT_ARRIVAL_HOLD_MINUTES,
     DEFAULT_HALF_LIFE_DAYS,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_LEAD_QUANTILE,
     DEFAULT_MAX_SENSOR_AGE_MINUTES,
     DEFAULT_PREHEAT_PRESET,
     DEFAULT_TARGET_MODE,
@@ -51,6 +53,8 @@ from .const import (
     HALF_LIFE_DAYS_MIN,
     HISTORY_DAYS_MAX,
     HISTORY_DAYS_MIN,
+    LEAD_QUANTILE_MAX,
+    LEAD_QUANTILE_MIN,
     MAX_SENSOR_AGE_MAX,
     MAX_SENSOR_AGE_MIN,
     PRESET_SUGGESTIONS,
@@ -229,6 +233,9 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
                     CONF_MAX_SENSOR_AGE_MINUTES: int(
                         user_input.get(CONF_MAX_SENSOR_AGE_MINUTES, DEFAULT_MAX_SENSOR_AGE_MINUTES)
                     ),
+                    CONF_LEAD_QUANTILE: float(
+                        user_input.get(CONF_LEAD_QUANTILE, DEFAULT_LEAD_QUANTILE)
+                    ),
                 }
             )
         current = {
@@ -240,6 +247,7 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
             CONF_ARRIVAL_HOLD_MINUTES: DEFAULT_ARRIVAL_HOLD_MINUTES,
             CONF_PREHEAT_PRESET: DEFAULT_PREHEAT_PRESET,
             CONF_MAX_SENSOR_AGE_MINUTES: DEFAULT_MAX_SENSOR_AGE_MINUTES,
+            CONF_LEAD_QUANTILE: DEFAULT_LEAD_QUANTILE,
             **self.config_entry.options,
         }
         schema = vol.Schema(
@@ -259,6 +267,9 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
                 ),
                 vol.Optional(CONF_MAX_SENSOR_AGE_MINUTES): _number(
                     MAX_SENSOR_AGE_MIN, MAX_SENSOR_AGE_MAX, 10, "min"
+                ),
+                vol.Optional(CONF_LEAD_QUANTILE): _number(
+                    LEAD_QUANTILE_MIN, LEAD_QUANTILE_MAX, 0.05
                 ),
             }
         )

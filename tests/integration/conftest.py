@@ -179,6 +179,7 @@ class FakeModel(ThermalModel):
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
         max_c: float | None = None,
+        quantile: float | None = None,
     ) -> PreheatEstimate:
         self.preheat_calls.append(
             {
@@ -188,6 +189,7 @@ class FakeModel(ThermalModel):
                 "outdoor": outdoor_c,
                 "forecast": forecast,
                 "max_c": max_c,
+                "quantile": quantile,
             }
         )
         assert self.params is not None

@@ -153,6 +153,7 @@ async def test_options_flow(hass: HomeAssistant) -> None:
         "arrival_hold_minutes": 30,
         "preheat_preset": "comfort",
         "max_sensor_age_minutes": 360,
+        "lead_quantile": 0.8,
     }
     coordinator = entry.runtime_data
     assert coordinator.target_mode == "climate"

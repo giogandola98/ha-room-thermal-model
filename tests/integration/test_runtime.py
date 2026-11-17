@@ -712,3 +712,20 @@ async def test_parameter_sensors_unknown_when_unreliable(
     assert state.state == STATE_UNKNOWN
     assert state.attributes["reliable"] is False
     assert state.attributes["raw_value"] == 8.0
+
+
+async def test_lead_uses_quantile_and_hold_cost_sensor(
+    hass: HomeAssistant, fake_model: None
+) -> None:
+    set_inputs(hass)
+    arrival = dt_util.utcnow() + timedelta(hours=3)
+    hass.states.async_set(ARRIVAL, arrival.isoformat(), {"device_class": "timestamp"})
+    entry = await setup_entry(hass, make_entry(hass, arrival=True, lead_quantile=0.9))
+    coordinator = await _fitted(hass, entry)
+    assert {c["quantile"] for c in coordinator.model.preheat_calls} >= {None, 0.9}
+    assert hass.states.get(NOW_SENSOR).attributes["lead_quantile"] == 0.9
+    attrs = hass.states.get(PREHEAT).attributes
+    for key in ("minutes_p50", "minutes_p80", "band_correction_minutes"):
+        assert key in attrs
+    hold = hass.states.get(f"sensor.{SLUG}_hold_cost")
+    assert hold is not None and hold.state == STATE_UNKNOWN  # fake model: no hold cost

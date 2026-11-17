@@ -59,9 +59,19 @@ it to the outside (a lumped *RC* model), on a 5-minute grid:
   When the room coasts up to the target by itself during the dead time, no heating is
   needed (0 minutes). For a preheat that starts later (preheat start), the outdoor
   temperature at that time comes from the forecast, not from the current reading.
+- **Correction on real heat-ups.** The model assumes full power until the target, but a
+  thermostatic valve throttles over the last ~0.5-1 K and a boiler cycles, so real
+  heat-ups take longer. For every real heat-up (heating after ≥ 1 h idle, rising ≥ 1 K;
+  pauses up to 15 min belong to it) the time to reach the setpoint − 0.3 K (or the
+  heat-up's top − 0.15 K without a recorded setpoint) is compared with the full-power
+  prediction; the last 40 ratios are kept. With ≥ 5 of them the preheat minutes are
+  multiplied by their median (limited to 0.8-1.5) and a cautious value uses their 80th
+  percentile; with fewer, the central value is not shifted and the cautious one is 25 %
+  longer. The preheat start uses the quantile set by the `lead_quantile` option (0.8).
 - **Maturity** compares the model's 60-minute-ahead temperature forecasts with what
-  really happened and with a naive "temperature stays the same" baseline, and checks
-  predicted vs observed heat-up durations.
+  really happened and with a naive "temperature stays the same" baseline; with ≥ 5 real
+  heat-ups it also scores the corrected preheat on them (leave-one-out bias and the share
+  of heat-ups done within the cautious value).
 
 Ideas for the dead-time detection, cooling-curve cross-check and forecast averaging come
 from [Ecronika/ha-preheat](https://github.com/Ecronika/ha-preheat) (MIT, © 2025 Ecronika).
@@ -92,7 +102,7 @@ Settings → Devices & services → Add integration → **Room Thermal Model**.
 Options: target temperature (fixed, default 20.5 °C; follow the climate's target; or a
 climate preset temperature), preheat preset (`comfort`), data half-life (21 days),
 history window (30 days), update interval (5 min), hold after the arrival time (30 min),
-maximum sensor age (360 min).
+maximum sensor age (360 min), preheat quantile (0.8).
 
 **Target modes and setback schedules.** "Follow the climate's target" uses the setpoint
 the climate has *right now*. With a schedule that lowers the setpoint while nobody is
@@ -124,7 +134,8 @@ expect larger errors.
 
 | Entity | Content |
 |---|---|
-| `sensor.<zone>_preheat_minutes` | minutes of full heating needed to reach the target; unknown while learning, when unreachable or without outdoor data (attribute `reason`, e.g. `unreachable`, `no_outdoor`) |
+| `sensor.<zone>_preheat_minutes` | minutes of heating needed to reach the target (central estimate, corrected on real heat-ups); unknown while learning, when unreachable or without outdoor data (attribute `reason`, e.g. `unreachable`, `no_outdoor`). Attributes `minutes_p50`, `minutes_p80`, `minutes_full_power`, `band_correction_minutes` |
+| `sensor.<zone>_hold_cost` | K/h the zone loses at the target at the current outdoor temperature (what heating must supply to hold it); attribute `duty_percent` = share of full heating power |
 | `sensor.<zone>_max_reachable_temperature` | highest temperature reachable at the outdoor temperature averaged over the preheat window, capped at the climate's `max_temp` (30 °C when unknown); unknown while the model is unreliable (attribute `reliable`); the uncapped model value is in the `details` attribute of the preheat sensor as `t_infinity_c` |
 | `sensor.<zone>_model_maturity` | 0–100 %; attributes `rmse_c`, `baseline_rmse_c` (1 h ahead), `rmse_4h_c`, `baseline_rmse_4h_c` (4 h ahead), `duration_mae_minutes`, `heating_hours`, `cooling_hours` |
 | `sensor.<zone>_preheat_start` | latest time to start heating to be at the target on arrival (only with an arrival sensor). The room keeps cooling until then, so it is computed from the temperature the room will have at the start time, not the current one. When the target is unreachable it aims at 0.5 K below the max reachable temperature instead |

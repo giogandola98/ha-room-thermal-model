@@ -16,6 +16,10 @@ and scored on the stored grid:
   (what ``preheat`` assumes) and compared with the measured time (bias / MAE in minutes,
   negative = predicted too early).
 
+- decision episodes (when the checkout has the preheat correction): measured vs
+  full-power minutes to the setpoint − 0.3 K (top − 0.15 K without setpoint), and the
+  corrected preheat scored leave-one-out (bias, MAE, share within the p80).
+
 ``--set module.NAME=value`` overrides a module constant before the fit, e.g.
 ``--set fit.OUTLIER_MAD=8`` (variants for experiments). Run the same script on two
 checkouts to compare before/after; the data files never belong in the repository.
@@ -37,7 +41,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "custom_components" / "room_thermal_model"))
 
-from rtm_core import ModelConfig, RCThermalModel  # noqa: E402
+from rtm_core import (  # noqa: E402
+    ModelConfig,
+    RCThermalModel,
+    quality,  # noqa: E402
+)
 from rtm_core.grid import Grid  # noqa: E402
 from rtm_core.quality import bad_rows, step_temperature  # noqa: E402
 
@@ -228,6 +236,21 @@ def run(path: str, horizons: list[float], bands: list[float], verbose: bool = Fa
     print("  horizon rmse/persistence: " + " | ".join(parts))
     for band in bands:
         print(f"  heat-ups to top-{band:g} K at full effort: {episode_scores(grid, p, band)}")
+    if hasattr(quality, "decision_errors"):
+        params = quality.Params(
+            p["a"], p["b"], p["c"], int(round(p["d_minutes"] / grid.step_minutes)), p["use_outdoor"]
+        )
+        errs = quality.decision_errors(grid, params, quality.bad_rows(grid, 1.5))
+        raw = [e.predicted_min - e.measured_min for e in errs]
+        loo = quality.leave_one_out(errs)
+        if raw:
+            print(
+                f"  preheat correction (model): {s.get('preheat_correction')}\n"
+                f"  decision episodes (whole grid): n={len(raw)} full-power bias "
+                f"{sum(raw) / len(raw):.1f} MAE {sum(map(abs, raw)) / len(raw):.1f} min | "
+                f"corrected leave-one-out bias {loo['bias_min']:.1f} MAE {loo['mae_min']:.1f} "
+                f"min, p80 coverage {loo['p80_coverage']:.0%}"
+            )
 
 
 def main() -> None:

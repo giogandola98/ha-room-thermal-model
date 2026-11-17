@@ -74,7 +74,8 @@
           "update_interval_minutes": "Aktualisierungsintervall",
           "arrival_hold_minutes": "Halten nach der Ankunftszeit",
           "preheat_preset": "Vorheiz-Preset",
-          "max_sensor_age_minutes": "Maximales Sensoralter"
+          "max_sensor_age_minutes": "Maximales Sensoralter",
+          "lead_quantile": "Vorheiz-Quantil"
         },
         "data_description": {
           "target_mode": "Ein festes Ziel verwenden oder der Solltemperatur des Thermostats folgen.",
@@ -84,7 +85,8 @@
           "update_interval_minutes": "Wie oft die Schätzung neu berechnet wird, in Minuten.",
           "arrival_hold_minutes": "Mit Ankunftssensor: wie lange „Jetzt vorheizen“ nach der erwarteten Ankunftszeit eingeschaltet bleibt, wenn es an war und noch niemand angekommen ist (eine statische, bereits vergangene Ankunftszeit). 0 = aus zur Ankunftszeit.",
           "preheat_preset": "Im Preset-Modus: Preset, dessen Temperatur (preset_temperatures.PRESET_temp (PRESET = this preset)) das Vorheizziel ist, z. B. comfort. Ohne diese Angabe wird das feste Ziel verwendet.",
-          "max_sensor_age_minutes": "Die Innentemperatur gilt als fehlend, wenn ihr Sensor so lange nichts gemeldet hat (defekter Sensor oder leere Batterie); die Zone meldet dann no_temperature."
+          "max_sensor_age_minutes": "Die Innentemperatur gilt als fehlend, wenn ihr Sensor so lange nichts gemeldet hat (defekter Sensor oder leere Batterie); die Zone meldet dann no_temperature.",
+          "lead_quantile": "Wie vorsichtig der Vorheizbeginn ist: verwendet die Aufheizzeit, die reale Aufheizvorgänge der Zone so oft eingehalten haben (0,8 = etwa 4 von 5 Mal rechtzeitig; 0,5 = zentrale Schätzung)."
         }
       }
     }
@@ -128,6 +130,9 @@
       },
       "arrival_temperature": {
         "name": "Temperatur bei Ankunft"
+      },
+      "hold_cost": {
+        "name": "Haltekosten"
       }
     }
   },

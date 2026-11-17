@@ -27,19 +27,28 @@ from .grid import Grid, ceil_ts, dt_of, floor_ts, resample, ts_of
 from .physics import coast_temperature, equilibrium, max_reachable, preheat_minutes
 from .quality import (
     HOLDOUT_FRACTION,
+    Correction,
+    EpisodeError,
     Params,
     bad_rows,
+    correction_from,
+    decision_errors,
     evaluate,
     experience_hours,
     heat_up_episodes,
+    leave_one_out,
     maturity,
+    merge_errors,
 )
 
 # v2 adds the per-sample setpoint column (grid + pending rows). v1 snapshots still load:
 # their setpoint is taken as None, so the learnt state is kept and the valve-throttling
 # detection simply falls back to the run-top band until new data carries a setpoint.
-STATE_VERSION = 2
-SUPPORTED_STATE_VERSIONS = frozenset({1, 2})
+# v3 adds ``episode_errors`` (measured vs predicted minutes of real heat-ups, the preheat
+# correction); v2 snapshots load with an empty list (no correction until it is rebuilt
+# at the next fit from the stored grid).
+STATE_VERSION = 3
+SUPPORTED_STATE_VERSIONS = frozenset({1, 2, 3})
 MIN_FIT_HOURS = 3.0  # usable data needed before the first fit
 MIN_QUALITY_HOURS = 12.0  # usable data needed for a holdout evaluation
 REFIT_SECONDS = 3600.0
@@ -106,6 +115,8 @@ class RCThermalModel(ThermalModel):
         self._last_fit_ts: float | None = None
         self._data_end_at_fit: float | None = None
         self._summary: dict[str, Any] = {}
+        self._episode_errors: list[EpisodeError] = []
+        self._correction: Correction = correction_from([])
 
     def reset_parameters(self) -> None:
         """Forget the learnt parameters and quality, keep the data (a fit becomes due)."""
@@ -321,7 +332,15 @@ class RCThermalModel(ThermalModel):
         self._outdoor_ref = self._recent_outdoor()
         rmse = evaluation.rmse if evaluation else None
         base = evaluation.baseline_rmse if evaluation else None
-        mat = maturity(heat_h, cool_h, rmse, base) if reliable else 0.0
+        # real heat-ups: measured vs predicted (final parameters) -> preheat correction
+        p_final = Params(res.a, res.b, res.c, res.d_steps, ds.use_outdoor)
+        fresh = decision_errors(grid, p_final, bad)
+        self._episode_errors = merge_errors(
+            self._episode_errors, fresh, grid.start_ts if grid.start_ts is not None else 0.0
+        )
+        self._correction = self._correction_of(self._episode_errors)
+        loo = leave_one_out(self._episode_errors) if self._correction.active else None
+        mat = maturity(heat_h, cool_h, rmse, base, loo) if reliable else 0.0
         self._quality = {
             "maturity": mat,
             "samples": grid.valid_indoor_count(),
@@ -333,6 +352,8 @@ class RCThermalModel(ThermalModel):
             "baseline_rmse_4h_c": evaluation.baseline_rmse_4h if evaluation else None,
             "duration_mae_minutes": evaluation.duration_mae if evaluation else None,
             "episodes": evaluation.episodes if evaluation else 0,
+            "episode_bias_minutes": loo["bias_min"] if loo else None,
+            "p80_coverage": loo["p80_coverage"] if loo else None,
         }
         cross: dict[str, Any] = {}
         if cool is not None:
@@ -365,9 +386,29 @@ class RCThermalModel(ThermalModel):
             "evaluation_windows": evaluation.windows if evaluation else 0,
             "heat_up_episodes_total": len(heat_up_episodes(grid, bad, 0, res.d_steps + 1)),
             "episode_errors_min": evaluation.episode_errors if evaluation else [],
+            "preheat_correction": self._correction_dict(),
+            "preheat_correction_loo": (
+                {k: _r(v, 3) if isinstance(v, float) else v for k, v in loo.items()}
+                if loo
+                else None
+            ),
             "fit_seconds": round(time.perf_counter() - t_start, 3),
         }
         return dict(self._summary)
+
+    @staticmethod
+    def _correction_of(errors: list[EpisodeError]) -> Correction:
+        return correction_from([e.ratio for e in errors], [e.duty for e in errors])
+
+    def _correction_dict(self) -> dict[str, Any]:
+        corr = self._correction
+        return {
+            "active": corr.active,
+            "episodes": corr.episodes,
+            "factor": round(corr.factor, 3),
+            "p80_factor": round(corr.p80, 3),
+            "mean_duty": _r(corr.duty, 3),
+        }
 
     def _refit(
         self,
@@ -451,6 +492,7 @@ class RCThermalModel(ThermalModel):
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
         max_c: float | None = None,
+        quantile: float | None = None,
     ) -> PreheatEstimate:
         p = self._params
         if p is None:
@@ -486,8 +528,18 @@ class RCThermalModel(ThermalModel):
         reason.update(pinfo)
         reason["solve"] = info
         reason["status"] = "ok" if minutes is not None else "unreachable"
+        corr = self._correction
+        reason["correction"] = self._correction_dict()
+        full = minutes
+        p50 = p80 = None
+        if full is not None:
+            p50, p80 = full * corr.factor, full * corr.p80
+            minutes = full * corr.at(quantile) if quantile is not None else p50
         return PreheatEstimate(
             minutes=minutes,
+            minutes_full_power=full,
+            minutes_p50=p50,
+            minutes_p80=p80,
             reachable=minutes is not None,
             target_c=target_c,
             start_c=start_c,
@@ -517,6 +569,19 @@ class RCThermalModel(ThermalModel):
             temp = max(temp, floor_c)
         return temp
 
+    def hold_cost(self, target_c: float, outdoor_c: float | None) -> tuple[float, float] | None:
+        p = self._params
+        if p is None or not p.get("reliable", True):
+            return None
+        if p["use_outdoor"]:
+            tout = outdoor_c if outdoor_c is not None else self._outdoor_ref
+            if tout is None:
+                return None
+        else:
+            tout = 0.0
+        loss = max(0.0, p["b"] * (target_c - tout) - p["c"])
+        return loss, min(1.0, loss / p["a"]) if p["a"] > 0 else 1.0
+
     def quality(self) -> QualityReport:
         q = self._quality
         samples = self._grid.valid_indoor_count()
@@ -533,6 +598,8 @@ class RCThermalModel(ThermalModel):
             episodes=q["episodes"],
             rmse_4h_c=q.get("rmse_4h_c"),
             baseline_rmse_4h_c=q.get("baseline_rmse_4h_c"),
+            episode_bias_minutes=q.get("episode_bias_minutes"),
+            p80_coverage=q.get("p80_coverage"),
         )
 
     # -- persistence --------------------------------------------------------------------
@@ -553,6 +620,7 @@ class RCThermalModel(ThermalModel):
             "last_fit_ts": self._last_fit_ts,
             "data_end_at_fit": self._data_end_at_fit,
             "summary": self._summary,
+            "episode_errors": [e.to_list() for e in self._episode_errors],
         }
 
     @classmethod
@@ -575,6 +643,15 @@ class RCThermalModel(ThermalModel):
         model._last_fit_ts = data.get("last_fit_ts")
         model._data_end_at_fit = data.get("data_end_at_fit")
         model._summary = data.get("summary") or {}
+        # v1/v2: no episode errors yet (rebuilt from the grid at the next fit)
+        try:
+            model._episode_errors = [
+                EpisodeError.from_list(row) for row in data.get("episode_errors") or []
+            ]
+        except (IndexError, TypeError, ValueError):
+            model._episode_errors = []
+        model._episode_errors = [e for e in model._episode_errors if e.predicted_min > 0]
+        model._correction = model._correction_of(model._episode_errors)
         model._last_sample_ts = data.get("last_sample_ts")
         grid_data = data.get("grid")
         if grid_data and float(grid_data.get("step_minutes", 0)) == config.step_minutes:

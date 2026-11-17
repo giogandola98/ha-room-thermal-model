@@ -35,6 +35,7 @@ from .conftest import (
 
 BASE_SENSORS = (
     "preheat_minutes",
+    "hold_cost",
     "max_reachable_temperature",
     "model_maturity",
     "time_constant",

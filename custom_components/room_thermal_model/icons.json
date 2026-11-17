@@ -14,7 +14,8 @@
       "time_constant": { "default": "mdi:timer-sand" },
       "heating_rate": { "default": "mdi:thermometer-plus" },
       "dead_time": { "default": "mdi:timer-pause-outline" },
-      "arrival_temperature": { "default": "mdi:home-thermometer-outline" }
+      "arrival_temperature": { "default": "mdi:home-thermometer-outline" },
+      "hold_cost": { "default": "mdi:thermometer-minus" }
     }
   },
   "services": {

@@ -24,6 +24,7 @@ TARGET_MODE_CLIMATE: Final = "climate"
 TARGET_MODE_CLIMATE_PRESET: Final = "climate_preset"  # preset_temperatures.<preset>_temp
 CONF_PREHEAT_PRESET: Final = "preheat_preset"
 CONF_MAX_SENSOR_AGE_MINUTES: Final = "max_sensor_age_minutes"
+CONF_LEAD_QUANTILE: Final = "lead_quantile"
 CONF_TARGET_TEMPERATURE: Final = "target_temperature"
 CONF_HALF_LIFE_DAYS: Final = "half_life_days"
 CONF_HISTORY_DAYS: Final = "history_days"
@@ -38,6 +39,7 @@ DEFAULT_UPDATE_INTERVAL_MINUTES: Final = 5
 DEFAULT_ARRIVAL_HOLD_MINUTES: Final = 30
 DEFAULT_PREHEAT_PRESET: Final = "comfort"
 DEFAULT_MAX_SENSOR_AGE_MINUTES: Final = 360
+DEFAULT_LEAD_QUANTILE: Final = 0.8
 PRESET_SUGGESTIONS: Final = ("comfort", "boost", "eco")
 
 # Services
@@ -64,6 +66,7 @@ KEY_TIME_CONSTANT: Final = "time_constant"
 KEY_HEATING_RATE: Final = "heating_rate"
 KEY_DEAD_TIME: Final = "dead_time"
 KEY_ARRIVAL_TEMPERATURE: Final = "arrival_temperature"
+KEY_HOLD_COST: Final = "hold_cost"
 
 # Repairs: target_mode climate + arrival sensor whose setpoint stays below the room
 ISSUE_SETPOINT_BELOW_CURRENT: Final = "setpoint_below_current"
@@ -83,6 +86,8 @@ ARRIVAL_HOLD_MIN: Final = 0
 ARRIVAL_HOLD_MAX: Final = 180
 MAX_SENSOR_AGE_MIN: Final = 30
 MAX_SENSOR_AGE_MAX: Final = 1440
+LEAD_QUANTILE_MIN: Final = 0.5
+LEAD_QUANTILE_MAX: Final = 0.95
 
 # Runtime tuning
 SAMPLE_INTERVAL_MINUTES: Final = 5  # live grid sample (independent of the update interval)

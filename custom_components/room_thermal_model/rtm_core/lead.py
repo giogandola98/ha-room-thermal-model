@@ -32,11 +32,13 @@ def lead_minutes(
     margin_k: float = UNREACHABLE_MARGIN_K,
     max_iterations: int = MAX_ITERATIONS,
     tolerance_minutes: float = TOLERANCE_MINUTES,
+    quantile: float | None = None,
 ) -> float | None:
     """Minutes before an arrival ``total`` minutes away at which heating must start.
 
-    ``estimate`` is the preheat estimate from now. Returns None when no lead can be
-    determined (no outdoor data, unreliable model).
+    ``estimate`` is the preheat estimate from now. ``quantile`` selects the preheat
+    duration quantile (e.g. 0.8: ready in time 4 times out of 5; None = central).
+    Returns None when no lead can be determined (no outdoor data, unreliable model).
     """
     goal = target_c
     if estimate.minutes is None:
@@ -51,6 +53,10 @@ def lead_minutes(
         estimate = model.preheat(now, indoor, goal, outdoor, forecast, max_c)
         if estimate.minutes is None:
             return total
+    if quantile is not None:
+        estimate = model.preheat(now, indoor, goal, outdoor, forecast, max_c, quantile=quantile)
+        if estimate.minutes is None:
+            return None
     lead = max(0.0, estimate.minutes)
     # From a future start the forecast describes the outdoor temperature; the value
     # measured now would wrongly anchor the curve there. Without a forecast the current
@@ -64,7 +70,13 @@ def lead_minutes(
         if start_c is None:
             break
         nxt = model.preheat(
-            now + timedelta(minutes=wait), start_c, goal, future_outdoor, forecast, max_c
+            now + timedelta(minutes=wait),
+            start_c,
+            goal,
+            future_outdoor,
+            forecast,
+            max_c,
+            quantile=quantile,
         ).minutes
         if nxt is None:
             break

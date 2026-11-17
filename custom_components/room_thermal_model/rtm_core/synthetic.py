@@ -12,6 +12,8 @@ exactly minute by minute::
   near the setpoint the real heating is a fraction of the full power;
 - optional heat source off (``heat_source_off_days``): the thermostat keeps reporting
   "heating" but no heat arrives (boiler idle, heating season not started);
+- optional burner cycling (``burner_duty`` < 1): the boiler fires only part of every
+  ``burner_period_minutes`` while "heating" is reported;
 - sensor readings with Gaussian noise (σ≈0.05 K) and 0.1 K quantisation;
 - outdoor temperature: daily sinusoid + weather fronts (smooth level changes);
 - disturbances: unflagged window openings (1–3 K drop in 10–20 min by default), missing data
@@ -57,6 +59,8 @@ class RoomSpec:
     weekday_comfort: tuple[tuple[float, float], ...] = ((6.5, 8.5), (17.0, 22.5))
     weekend_comfort: tuple[tuple[float, float], ...] = ((8.0, 23.0),)
     trv_band_k: float = 0.0
+    burner_duty: float = 1.0  # share of each burner cycle the boiler really fires
+    burner_period_minutes: int = 10
     heat_source_off_days: tuple[tuple[float, float], ...] = ()
     seed: int = 1
 
@@ -264,6 +268,11 @@ def generate(
         day = m / 1440.0
         if any(lo <= day < hi for lo, hi in spec.heat_source_off_days):
             u = 0.0
+        if spec.burner_duty < 1.0 and u > 0.0:
+            # the boiler cycles while the thermostat keeps reporting "heating"
+            phase = m % spec.burner_period_minutes
+            if phase >= spec.burner_duty * spec.burner_period_minutes:
+                u = 0.0
         u_hist.append(u)
         true_temp.append(temp)
         out_list.append(tout)
@@ -421,6 +430,31 @@ def trv_room(**kw: object) -> RoomSpec:
     return RoomSpec(**base)  # type: ignore[arg-type]
 
 
+def trv_cycling_room(**kw: object) -> RoomSpec:
+    """Thermostatic valve with a proportional band and a cycling burner (duty 0.9).
+
+    A setback/comfort schedule with ~1.5-3 K morning and evening heat-ups: the full-power
+    model reaches the target too early (the valve throttles over the last 0.8 K, the
+    burner fires 90 % of the time), which the preheat correction learns.
+    """
+    base: dict[str, object] = {
+        "name": "trv_cycling",
+        "a": 2.0,
+        "b": 1.0 / 40.0,
+        "c": 0.1,
+        "dead_time_minutes": 15.0,
+        "trv_band_k": 0.8,
+        "hysteresis_k": 0.1,
+        "burner_duty": 0.9,
+        "eco_c": 17.5,
+        "comfort_c": 20.5,
+        "outdoor_mean": 5.0,
+        "seed": 23,
+    }
+    base.update(kw)
+    return RoomSpec(**base)  # type: ignore[arg-type]
+
+
 def trv_eco_comfort_room(**kw: object) -> RoomSpec:
     """Thermostatic valve on a simple night-eco / day-comfort schedule.
 
@@ -459,4 +493,5 @@ ROOMS: dict[str, Callable[..., RoomSpec]] = {
     "trv": trv_room,
     "trv_eco_comfort": trv_eco_comfort_room,
     "slow_radiator": slow_radiator_room,
+    "trv_cycling": trv_cycling_room,
 }

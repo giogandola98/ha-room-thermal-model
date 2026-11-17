@@ -82,6 +82,11 @@ class PreheatEstimate:
     outdoor_used_c: float | None  # effective (forecast-averaged) outdoor temperature
     max_reachable_c: float | None  # T_infinity at full effort, capped (max setpoint)
     reason: dict[str, Any] = field(default_factory=dict)
+    # ``minutes`` is the central estimate, corrected on real heat-ups (valve band, burner
+    # cycling), or the requested quantile; these are the full-power value and quantiles
+    minutes_full_power: float | None = None
+    minutes_p50: float | None = None
+    minutes_p80: float | None = None
 
 
 @dataclass
@@ -98,6 +103,8 @@ class QualityReport:
     episodes: int = 0
     rmse_4h_c: float | None = None  # 4-h-ahead simulated forecast RMSE
     baseline_rmse_4h_c: float | None = None
+    episode_bias_minutes: float | None = None  # corrected preheat − measured, leave-one-out
+    p80_coverage: float | None = None  # share of real heat-ups done within the p80
 
 
 class ThermalModel(ABC):
@@ -142,11 +149,14 @@ class ThermalModel(ABC):
         outdoor_c: float | None,
         forecast: Sequence[ForecastPoint] = (),
         max_c: float | None = None,
+        quantile: float | None = None,
     ) -> PreheatEstimate:
-        """Minutes of full-effort heating needed to reach ``target_c`` from ``start_c``.
+        """Minutes of heating (starting now at full effort) to reach ``target_c``.
 
         ``max_c`` caps the maximum reachable temperature (e.g. the climate's
-        ``max_temp``); the model applies its own default ceiling when None.
+        ``max_temp``); the model applies its own default ceiling when None. ``minutes`` is
+        the central estimate, or the ``quantile`` (e.g. 0.8: done in time 4 times out of
+        5) when given.
         """
 
     @abstractmethod
@@ -164,6 +174,10 @@ class ThermalModel(ABC):
         ``floor_c``: the thermostat holds this setpoint (a setback), so the room does not
         cool below it. None when the model is not usable (not fitted, unreliable).
         """
+
+    def hold_cost(self, target_c: float, outdoor_c: float | None) -> tuple[float, float] | None:
+        """(K/h lost while holding ``target_c``, share of full power needed) or None."""
+        return None
 
     @abstractmethod
     def quality(self) -> QualityReport:
