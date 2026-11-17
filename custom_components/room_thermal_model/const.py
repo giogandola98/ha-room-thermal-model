@@ -21,7 +21,7 @@ CONF_ARRIVAL_SENSOR: Final = "arrival_sensor"  # optional timestamp sensor
 CONF_TARGET_MODE: Final = "target_mode"
 TARGET_MODE_FIXED: Final = "fixed"
 TARGET_MODE_CLIMATE: Final = "climate"
-TARGET_MODE_CLIMATE_PRESET: Final = "climate_preset"  # preset_temperatures.PRESET_temp (PRESET = this preset)
+TARGET_MODE_CLIMATE_PRESET: Final = "climate_preset"  # preset_temperatures.<preset>_temp
 CONF_PREHEAT_PRESET: Final = "preheat_preset"
 CONF_MAX_SENSOR_AGE_MINUTES: Final = "max_sensor_age_minutes"
 CONF_TARGET_TEMPERATURE: Final = "target_temperature"
