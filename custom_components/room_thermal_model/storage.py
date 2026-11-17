@@ -11,6 +11,7 @@ Stored document (``.storage/room_thermal_model.<entry_id>``)::
                                    # (null/missing in older documents: accepted as-is)
       "history_merged": 2          # version of the last one-off recorder re-merge
                                    # (store 1.2; missing in 1.1 documents = 0)
+      "latch": {...} | null        # latched preheat_now (store 1.3; missing = none)
     }
 """
 
@@ -38,6 +39,7 @@ def empty_document() -> StoredData:
         "bootstrapped": False,
         "inputs": None,
         "history_merged": 0,
+        "latch": None,
     }
 
 
@@ -53,11 +55,14 @@ class RTMStore(Store[StoredData]):
         """Migrate stored data to the current version.
 
         1.1 → 1.2: no ``history_merged`` key yet (0): the coordinator re-merges the
-        recorder history once. Add ``if old_major_version < N`` steps here.
+        recorder history once. 1.2 → 1.3: no ``latch`` yet (not latched).
+        Add ``if old_major_version < N`` steps here.
         """
         data = dict(old_data)
         if old_major_version == 1 and old_minor_version < 2:
             data.setdefault("history_merged", 0)
+        if old_major_version == 1 and old_minor_version < 3:
+            data.setdefault("latch", None)  # not latched
         return data
 
 
@@ -78,9 +83,11 @@ class RTMStorage:
             document.update(data)
         return document
 
-    def async_schedule_save(self, data_func: Callable[[], StoredData]) -> None:
+    def async_schedule_save(
+        self, data_func: Callable[[], StoredData], delay: float = SAVE_DELAY_SECONDS
+    ) -> None:
         """Delayed save (coalesces bursts; Store also flushes it on HA's final write)."""
-        self._store.async_delay_save(data_func, SAVE_DELAY_SECONDS)
+        self._store.async_delay_save(data_func, delay)
 
     async def async_save(self, data: StoredData) -> None:
         """Save immediately."""

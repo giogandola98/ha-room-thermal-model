@@ -69,14 +69,16 @@
           "target_temperature": "Fixed target",
           "half_life_days": "History half-life",
           "history_days": "History to learn from",
-          "update_interval_minutes": "Update interval"
+          "update_interval_minutes": "Update interval",
+          "arrival_hold_minutes": "Hold after the arrival time"
         },
         "data_description": {
           "target_mode": "Use a fixed target or follow the thermostat's set temperature.",
           "target_temperature": "Target used in fixed mode (also the fallback when the thermostat has no set temperature).",
           "half_life_days": "Older data weighs half after this many days (adapts to seasons).",
           "history_days": "Days of recorder history loaded on first start and by the retrain action.",
-          "update_interval_minutes": "How often the estimate is recomputed, in minutes."
+          "update_interval_minutes": "How often the estimate is recomputed, in minutes.",
+          "arrival_hold_minutes": "With an arrival sensor: how long preheat now stays on after the expected arrival time when it was on and nobody has arrived yet (a static arrival time that has passed). 0 = off at the arrival time."
         }
       }
     }

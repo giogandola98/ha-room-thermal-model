@@ -221,7 +221,7 @@ async def test_store_round_trip(
     key = f"{DOMAIN}.{entry.entry_id}"
     stored = hass_storage[key]
     assert stored["version"] == 1
-    assert stored["minor_version"] == 2
+    assert stored["minor_version"] == 3
     assert stored["data"]["schema"] == 1
     assert stored["data"]["history_merged"] == 2
     assert stored["data"]["bootstrapped"] is True
@@ -343,7 +343,7 @@ async def test_store_v1_1_is_merged_with_history_once(
     assert coordinator.history_merged == 2
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
-    assert hass_storage[key]["minor_version"] == 2
+    assert hass_storage[key]["minor_version"] == 3
     assert hass_storage[key]["data"]["history_merged"] == 2
 
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -410,3 +410,25 @@ async def test_real_model_end_to_end(hass: HomeAssistant, no_history: Any) -> No
     assert hass.states.get(f"sensor.{SLUG}_model_maturity").attributes["last_fit"]
     diag = await async_get_config_entry_diagnostics(hass, entry)
     json.dumps(diag, default=str)
+
+
+async def test_store_v1_2_loads_unlatched(
+    hass: HomeAssistant, fake_model: None, hass_storage: dict[str, Any], no_history: Any
+) -> None:
+    """A 1.2 document (no latch) loads as not latched, without a history re-merge."""
+    set_inputs(hass)
+    entry = make_entry(hass)
+    key = f"{DOMAIN}.{entry.entry_id}"
+    document = {
+        "schema": 1,
+        "model": {"fake": True, "fitted": True},
+        "last_fit": None,
+        "bootstrapped": True,
+        "inputs": [CLIMATE],
+        "history_merged": 2,
+    }
+    hass_storage[key] = {"version": 1, "minor_version": 2, "key": key, "data": document}
+    await setup_entry(hass, entry)
+    assert entry.runtime_data.latch is None
+    assert entry.runtime_data.model.params is not None
+    no_history.assert_not_called()

@@ -20,6 +20,9 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    ARRIVAL_HOLD_MAX,
+    ARRIVAL_HOLD_MIN,
+    CONF_ARRIVAL_HOLD_MINUTES,
     CONF_ARRIVAL_SENSOR,
     CONF_CLIMATE,
     CONF_EFFORT_SENSOR,
@@ -33,6 +36,7 @@ from .const import (
     CONF_UPDATE_INTERVAL_MINUTES,
     CONF_WEATHER,
     CONF_ZONE_NAME,
+    DEFAULT_ARRIVAL_HOLD_MINUTES,
     DEFAULT_HALF_LIFE_DAYS,
     DEFAULT_HISTORY_DAYS,
     DEFAULT_TARGET_MODE,
@@ -198,6 +202,9 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
                     CONF_HALF_LIFE_DAYS: float(user_input[CONF_HALF_LIFE_DAYS]),
                     CONF_HISTORY_DAYS: int(user_input[CONF_HISTORY_DAYS]),
                     CONF_UPDATE_INTERVAL_MINUTES: int(user_input[CONF_UPDATE_INTERVAL_MINUTES]),
+                    CONF_ARRIVAL_HOLD_MINUTES: int(
+                        user_input.get(CONF_ARRIVAL_HOLD_MINUTES, DEFAULT_ARRIVAL_HOLD_MINUTES)
+                    ),
                 }
             )
         current = {
@@ -206,6 +213,7 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
             CONF_HALF_LIFE_DAYS: DEFAULT_HALF_LIFE_DAYS,
             CONF_HISTORY_DAYS: DEFAULT_HISTORY_DAYS,
             CONF_UPDATE_INTERVAL_MINUTES: DEFAULT_UPDATE_INTERVAL_MINUTES,
+            CONF_ARRIVAL_HOLD_MINUTES: DEFAULT_ARRIVAL_HOLD_MINUTES,
             **self.config_entry.options,
         }
         schema = vol.Schema(
@@ -219,6 +227,9 @@ class RoomThermalModelOptionsFlow(OptionsFlowWithReload):
                 ),
                 vol.Required(CONF_UPDATE_INTERVAL_MINUTES): _number(
                     UPDATE_INTERVAL_MIN, UPDATE_INTERVAL_MAX, 1, "min"
+                ),
+                vol.Optional(CONF_ARRIVAL_HOLD_MINUTES): _number(
+                    ARRIVAL_HOLD_MIN, ARRIVAL_HOLD_MAX, 5, "min"
                 ),
             }
         )

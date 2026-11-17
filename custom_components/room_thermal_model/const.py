@@ -25,12 +25,14 @@ CONF_TARGET_TEMPERATURE: Final = "target_temperature"
 CONF_HALF_LIFE_DAYS: Final = "half_life_days"
 CONF_HISTORY_DAYS: Final = "history_days"
 CONF_UPDATE_INTERVAL_MINUTES: Final = "update_interval_minutes"
+CONF_ARRIVAL_HOLD_MINUTES: Final = "arrival_hold_minutes"
 
 DEFAULT_TARGET_MODE: Final = TARGET_MODE_FIXED
 DEFAULT_TARGET_TEMPERATURE: Final = 20.5
 DEFAULT_HALF_LIFE_DAYS: Final = 21
 DEFAULT_HISTORY_DAYS: Final = 30
 DEFAULT_UPDATE_INTERVAL_MINUTES: Final = 5
+DEFAULT_ARRIVAL_HOLD_MINUTES: Final = 30
 
 # Services
 SERVICE_RETRAIN: Final = "retrain"
@@ -41,7 +43,8 @@ SERVICE_EXPORT_DIAGNOSTICS: Final = "export_diagnostics"
 STORAGE_VERSION: Final = 1
 # 1.2: ``history_merged`` flag (recorder history re-merged once after the upgrade that
 # made history merging fill the setpoint column)
-STORAGE_MINOR_VERSION: Final = 2
+# 1.3: ``latch`` (preheat_now latch survives a restart; missing = not latched)
+STORAGE_MINOR_VERSION: Final = 3
 HISTORY_MERGE_VERSION: Final = 2
 
 # Entity keys (translation_key == key; unique_id = f"{entry_id}_{key}";
@@ -65,6 +68,8 @@ HISTORY_DAYS_MIN: Final = 7
 HISTORY_DAYS_MAX: Final = 90
 UPDATE_INTERVAL_MIN: Final = 1
 UPDATE_INTERVAL_MAX: Final = 30
+ARRIVAL_HOLD_MIN: Final = 0
+ARRIVAL_HOLD_MAX: Final = 180
 
 # Runtime tuning
 SAMPLE_INTERVAL_MINUTES: Final = 5  # live grid sample (independent of the update interval)
@@ -80,7 +85,8 @@ FALLBACK_EFFORT_MARGIN_K: Final = 0.2  # no hvac_action: heating when target > c
 LEAD_MAX_ITERATIONS: Final = 10  # fixed-point iterations of the preheat lead time
 LEAD_TOLERANCE_MINUTES: Final = 0.5  # lead time convergence threshold
 UNREACHABLE_MARGIN_K: Final = 0.5  # unreachable target: aim this far below the maximum
-PREHEAT_HOLD_MINUTES: Final = 30  # preheat_now stays latched unless arrival moves this late
+PREHEAT_HOLD_MINUTES: Final = 30  # latch released when the arrival moves this much later
+ARRIVAL_MISSING_UPDATES: Final = 2  # latch released after more updates without an arrival
 
 # hvac_action values (standard HVACAction strings)
 HEATING_ACTIONS: Final = frozenset({"heating", "preheating"})

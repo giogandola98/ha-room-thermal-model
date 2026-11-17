@@ -38,8 +38,9 @@ class PreheatNowBinarySensor(RTMEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         """Evaluated against the current time (timers refresh it at the edges).
 
-        Once on, it stays on until the arrival even if the room reaches the target early
-        (the coordinator releases it when the arrival is postponed far beyond the start).
+        Once on, it stays on until the arrival even if the room reaches the target early,
+        and for ``arrival_hold_minutes`` after an arrival time that passed without anyone
+        arriving (the coordinator releases it, see ``coordinator.Latch``).
         """
         zone = self.zone
         return zone.preheat_now(dt_util.utcnow()) if zone else None
@@ -57,4 +58,10 @@ class PreheatNowBinarySensor(RTMEntity, BinarySensorEntity):
                 round(zone.preheat_minutes) if zone.preheat_minutes is not None else None
             ),
             "reason": zone.status,
+            "latched": zone.latched,
+            "arrival_at_latch": (
+                zone.arrival_at_latch.isoformat() if zone.arrival_at_latch else None
+            ),
+            "hold_until": zone.hold_until.isoformat() if zone.hold_until else None,
+            "lead_minutes": round(zone.lead_minutes) if zone.lead_minutes is not None else None,
         }
